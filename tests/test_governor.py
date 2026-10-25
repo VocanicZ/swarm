@@ -1,4 +1,6 @@
+import tempfile
 import unittest
+from pathlib import Path
 from unittest import mock
 
 from swarm import governor as g
@@ -46,6 +48,52 @@ class GovernorTests(unittest.TestCase):
         with mock.patch("shutil.which", return_value=None):
             self.assertIsNone(g.read_gpu())
         self.assertEqual(g.publish_gpu(None, 0, 0), {"ok": False, "free_vram_mb": 0})
+
+    def test_parse_pmon(self):
+        txt = ("# gpu         pid   type     sm    mem    enc    dec    jpg    ofa    command\n"
+               "# Idx           #    C/G      %      %      %      %      %      %    name\n"
+               "    0       1234     C     45     10      -      -      -      -    python3\n"
+               "    0       5678     G      -      -      -      -      -      -    Xorg\n")
+        self.assertEqual(g.parse_pmon(txt), {1234: 45, 5678: 0})
+
+    def test_mem_step(self):
+        st = (None, None)
+        st, a = g.mem_step(st, 0, 10, 5)
+        self.assertIsNone(a)
+        st, a = g.mem_step(st, 30, 10, 5)
+        self.assertIsNone(a)  # not yet >30 s
+        st, a = g.mem_step(st, 31, 10, 5)
+        self.assertEqual(a, "freeze")
+        st, a = g.mem_step(st, 50, 10, 5)
+        self.assertIsNone(a)
+        st, a = g.mem_step(st, 62, 10, 5)
+        self.assertEqual(a, "vacate")
+        self.assertEqual(st, (None, None))
+        # back under while frozen -> unfreeze
+        st, _ = g.mem_step((None, None), 0, 10, 5)
+        st, a = g.mem_step(st, 31, 10, 5)
+        st, a = g.mem_step(st, 32, 4, 5)
+        self.assertEqual(a, "unfreeze")
+        self.assertEqual(st, (None, None))
+
+    def test_cg_missing(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(g, "CG", Path(d) / "nope"):
+            self.assertEqual(g.measure_cg(), (0, 0, 0, False))
+            g._write("cpu.max", "1 1")  # must be a silent no-op
+
+    def test_cg_present(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(g, "CG", Path(d)):
+            (Path(d) / "cpu.stat").write_text("usage_usec 500\nuser_usec 1\n")
+            (Path(d) / "memory.current").write_text("4096\n")
+            (Path(d) / "memory.stat").write_text("anon 1024\nfile 3072\n")
+            self.assertEqual(g.measure_cg(), (500, 4096, 1024, True))
+
+    def test_owner_gpu(self):
+        gpu = {"util_pct": 70, "used_mb": 1000, "procs": {11: 400, 22: 100}, "sm": {11: 45, 22: 5}}
+        with mock.patch.object(g, "_swarm_pids", return_value={11}):
+            self.assertEqual(g.owner_gpu(gpu), (600, 25))
+            gpu["sm"] = None
+            self.assertEqual(g.owner_gpu(gpu), (600, 0))
 
 
 if __name__ == "__main__":
