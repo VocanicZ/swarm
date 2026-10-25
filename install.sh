@@ -49,6 +49,7 @@ if [[ $REPO != /opt/swarm ]]; then
   command -v rsync >/dev/null || { apt-get update && apt-get install -y rsync; }  # absent on the claude LXC
   # root runs this code (tick, governor, `sudo install.sh` via join): root-owned, not group/other-writable
   rsync -a --delete --chown=root:root --chmod=go-w --exclude .git "$REPO/" /opt/swarm/
+  chmod 755 /opt/swarm  # rsync copies the source dir mode, which may be 0700
 fi
 ln -sf /opt/swarm/bin/swarm /usr/local/bin/swarm
 IP=$(ip -4 route get "${coord:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
