@@ -1,0 +1,6 @@
+name = "toy"
+threads = 1
+save_seconds = 60
+split = "bash split.sh"
+run = "bash run.sh {shard} {out}"
+merge = "bash merge.sh {outs}"
