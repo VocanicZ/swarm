@@ -18,6 +18,7 @@ import time
 from pathlib import Path
 
 KILL_GRACE = 10
+GPU_STALE_S = 10  # governor rewrites gpu.json every 2 s; older = governor dead
 POLL = float(os.environ.get("SWARM_POLL_SECONDS", 5))
 MARKER_ROOT = Path("/var/tmp")
 
@@ -61,8 +62,11 @@ def fit(job, work):
 
 
 def gpu_ok(job, run_dir):
+    p = run_dir / "gpu.json"
     try:
-        g = json.loads((run_dir / "gpu.json").read_text())
+        g = json.loads(p.read_text())
+        if time.time() - p.stat().st_mtime > GPU_STALE_S:
+            return False
     except (OSError, ValueError):
         return False
     return g.get("ok") is True and g.get("free_vram_mb", 0) >= job.get("vram_mb", 0)
@@ -82,6 +86,11 @@ def take_gpu(job, run_dir):
         os.close(fd)
         return None
     return fd
+
+
+def poll_s(gpu):
+    """GPU runs poll at 1 s so a revoke frees VRAM within ~3 s (2 s governor tick + 1 s)."""
+    return min(POLL, 1.0) if gpu else POLL
 
 
 def newest_mtime(out):
@@ -146,7 +155,7 @@ def main(argv):
             save_at = time.time() + save
         try:
             while True:
-                time.sleep(POLL)
+                time.sleep(poll_s(gpu))
                 if p.poll() is not None:
                     rc = p.returncode
                     return rc if rc >= 0 else 128 - rc

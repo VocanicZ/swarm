@@ -108,6 +108,20 @@ class ShardTest(unittest.TestCase):
         self.assertEqual(shard.main(["s1"]), 0)
         self.assertEqual((box / "out/mode").read_text(), "0\n")
 
+    def test_gpu_stale_file_falls_back(self):
+        # governor dead: a leftover ok=true gpu.json must not grant the GPU
+        self.set_gpu(True)
+        old = time.time() - 30
+        os.utime(self.run_dir / "gpu.json", (old, old))
+        box = self.sandbox('echo "$SWARM_GPU" > "$2/mode"\n', gpu="optional", vram_mb=1000)
+        self.assertEqual(shard.main(["s1"]), 0)
+        self.assertEqual((box / "out/mode").read_text(), "0\n")
+
+    def test_gpu_poll_fast(self):
+        with mock.patch.object(shard, "POLL", 5.0):
+            self.assertEqual(shard.poll_s(True), 1.0)
+            self.assertEqual(shard.poll_s(False), 5.0)
+
     def test_gpu_required_waits(self):
         box = self.sandbox('echo "$SWARM_GPU $CUDA_VISIBLE_DEVICES" > "$2/mode"\n',
                            gpu="required", vram_mb=1000)

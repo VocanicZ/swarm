@@ -60,11 +60,22 @@ def publish_gpu(gpu: dict | None, util_pct: float, your_vram_mb: int) -> dict:
     return gpu_state(util_pct, gpu["total_mb"], your_vram_mb)
 
 
-def startd_ad(cap_cpu_pct: float, ncpu: int, link_mbps: float, gpus: int, gpu_free_mb: int) -> str:
+def owner_cpu(prev: tuple | None, busy: int, total: int, sw_usec: int) -> float | None:
+    """Owner CPU % since prev=(busy, total, swarm_usec); None until a delta exists."""
+    if not prev or total <= prev[1]:
+        return None
+    sw_j = max(0, sw_usec - prev[2]) / 1e6 * HZ
+    return max(0.0, min(100.0, ((busy - prev[0]) - sw_j) / (total - prev[1]) * 100))
+
+
+def startd_ad(cap_cpu_pct: float, ncpu: int, link_mbps: float, gpus: int, gpu_free_mb: int,
+              cap_ram_pct: float, mem_total_mb: int, now: float) -> str:
     return (f"SwarmCapCores = {math.floor(cap_cpu_pct * ncpu / 100)}\n"
             f"SwarmLinkMbps = {link_mbps:g}\n"
             f"SwarmGpus = {gpus}\n"
-            f"SwarmGpuFreeMB = {gpu_free_mb}\n")
+            f"SwarmGpuFreeMB = {gpu_free_mb}\n"
+            f"SwarmCapMemoryMB = {int(cap_ram_pct * mem_total_mb / 100)}\n"
+            f"SwarmAdTime = {int(now)}\n")  # START refuses ads older than 60 s (dead governor)
 
 
 def parse_pmon(text: str) -> dict:
@@ -215,11 +226,11 @@ def main() -> int:
         sw_usec, mem_cur, anon, present = measure_cg()
         if not present:
             _log_once("cg", f"{CG} missing; assuming no swarm usage, skipping cgroup writes")
-        cpu_you = 0.0
-        if prev and total > prev[1]:
-            sw_j = max(0, sw_usec - prev[2]) / 1e6 * HZ
-            cpu_you = max(0.0, min(100.0, ((busy - prev[0]) - sw_j) / (total - prev[1]) * 100))
+        cpu_you = owner_cpu(prev, busy, total, sw_usec)
         prev = (busy, total, sw_usec)
+        if cpu_you is None:  # first tick: owner use unknown, so no cap/ad yet (cpu_you=0 would mean 90%)
+            time.sleep(TICK_S)
+            continue
         ram_you = max(0.0, (mem_total - mem_avail - anon) / mem_total * 100)  # anon: cache is in MemAvailable
 
         gpu = read_gpu()
@@ -253,7 +264,8 @@ def main() -> int:
             pub = publish_gpu(None, 0, 0)
         try:
             _atomic(RUN / "gpu.json", json.dumps(pub))
-            _atomic(RUN / "startd.ad", startd_ad(caps["cpu"], ncpu, link, 1 if gpu else 0, pub["free_vram_mb"]))
+            _atomic(RUN / "startd.ad", startd_ad(caps["cpu"], ncpu, link, 1 if gpu else 0, pub["free_vram_mb"],
+                                                 caps["ram"], mem_total // 2**20, time.time()))
         except OSError as e:
             _log_once("publish", f"cannot publish: {e}")
 

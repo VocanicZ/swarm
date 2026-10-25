@@ -38,11 +38,19 @@ class GovernorTests(unittest.TestCase):
         self.assertEqual(g.gpu_state(0, 8192, 8000), {"ok": False, "free_vram_mb": 0})
 
     def test_startd_ad(self):
-        ad = g.startd_ad(60, 20, 100, 1, 6372)
+        ad = g.startd_ad(60, 20, 100, 1, 6372, 50, 16000, 1792900000)
         self.assertIn("SwarmCapCores = 12", ad)
         self.assertIn("SwarmGpuFreeMB = 6372", ad)
         self.assertIn("SwarmLinkMbps = 100", ad)
         self.assertIn("SwarmGpus = 1", ad)
+        self.assertIn("SwarmCapMemoryMB = 8000", ad)
+        self.assertIn("SwarmAdTime = 1792900000", ad)
+
+    def test_owner_cpu(self):
+        self.assertIsNone(g.owner_cpu(None, 200, 1000, 0))  # first tick: no delta yet
+        self.assertIsNone(g.owner_cpu((200, 1000, 0), 200, 1000, 0))  # no time passed
+        # 100 of 1000 jiffies busy, swarm used 0.5 s = 50 jiffies -> owner 5%
+        self.assertAlmostEqual(g.owner_cpu((200, 1000, 0), 300, 2000, 500000), 5.0)
 
     def test_no_nvidia(self):
         with mock.patch("shutil.which", return_value=None):

@@ -8,6 +8,8 @@ WorkingDirectory=/opt/swarm
 ExecStart=/usr/bin/python3 -m swarm.governor
 Restart=always
 RestartSec=2
+# fail closed while the governor is down: throttle swarm jobs to 1% of a core ("-": no cgroup is fine)
+ExecStopPost=-/bin/sh -c 'echo 1000 100000 > /sys/fs/cgroup/system.slice/condor.service/htcondor/cpu.max'
 RuntimeDirectory=swarm
 RuntimeDirectoryPreserve=yes
 
