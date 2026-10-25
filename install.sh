@@ -31,6 +31,7 @@ done
 # --- common ---
 if [[ $REPO != /opt/swarm ]]; then
   mkdir -p /opt/swarm
+  command -v rsync >/dev/null || apt-get install -y rsync  # absent on the claude LXC
   rsync -a --delete --exclude .git "$REPO/" /opt/swarm/
 fi
 ln -sf /opt/swarm/bin/swarm /usr/local/bin/swarm
@@ -64,7 +65,8 @@ if [[ $role == coordinator ]]; then
     [[ -n $home ]] || die "no such user: $user"
     mkdir -p "$home/.claude/skills/swarm"
     cp -r /opt/swarm/skill/. "$home/.claude/skills/swarm/"
-    chown -R "$user:" "$home/.claude/skills"
+    chown "$user:" "$home/.claude" "$home/.claude/skills"  # mkdir -p may have created them as root
+    chown -R "$user:" "$home/.claude/skills/swarm"
   else
     echo "install.sh: no SUDO_USER or --user; skipping Claude Code skill" >&2
   fi
