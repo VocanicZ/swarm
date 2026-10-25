@@ -1,0 +1,15 @@
+executable              = count.py
+arguments               = 600 60
+checkpoint_exit_code    = 85
+transfer_checkpoint_files = count.ckpt
+should_transfer_files   = yes
+output                  = count.out
+error                   = count.err
+log                     = count.log
+request_cpus            = 1
+request_memory          = 64M
+request_disk            = 10M
+# spike: prefer desktop so we can kill it mid-run
+rank                    = regexp("^nathanielsong", TARGET.Machine, "i") * 10
+job_lease_duration      = 120
+queue 1

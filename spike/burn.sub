@@ -1,0 +1,10 @@
+executable     = burn.sh
+should_transfer_files = yes
+output = burn.out
+error  = burn.err
+log    = burn.log
+request_cpus   = 4
+request_memory = 64M
+request_disk   = 10M
+requirements   = regexp("^nathanielsong", TARGET.Machine, "i")
+queue 1

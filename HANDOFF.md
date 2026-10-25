@@ -1,9 +1,17 @@
 # Handoff — 2026-10-25
 
-**State:** design approved by the owner (`docs/superpowers/specs/2026-10-25-swarm-design.md`,
-read the Addendum at the bottom). Nothing built yet.
+**State:** design approved (`docs/superpowers/specs/2026-10-25-swarm-design.md`, read the Addendum).
+**HTCondor spike done 2026-10-25: PASS** — see `spike/RESULTS.md` (gotchas list = requirements for the
+swarm layer). HTCondor 25.14.1 is still installed and running on both machines (claude: CM+submit+execute,
+`NUM_CPUS = 2`, config in `spike/claude-99-swarm-spike.config`; desktop: execute). Pool password:
+`~/.config/swarm/pool-password` on the desktop.
 
-## Next step: 1-hour HTCondor spike (throwaway; owner said yes)
+## Next step
+Owner confirms route (recommended: HTCondor + thin layer), then `superpowers:writing-plans` for the
+thin layer: governor (cgroup caps on `condor.service/htcondor`), liveness/invalidate loop,
+`swarm.toml` → submit translator, `swarm` user, skill.
+
+## Spike plan (done, kept for reference)
 
 Goal: prove HTCondor's self-checkpointing + resume-elsewhere works between the two machines.
 
