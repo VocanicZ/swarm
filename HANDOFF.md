@@ -7,8 +7,8 @@ swarm layer). HTCondor 25.14.1 is still installed and running on both machines (
 `~/.config/swarm/pool-password` on the desktop.
 
 ## Next step
-Owner confirms route (recommended: HTCondor + thin layer), then `superpowers:writing-plans` for the
-thin layer: governor (cgroup caps on `condor.service/htcondor`), liveness/invalidate loop,
+Route approved by owner (HTCondor + thin layer). Plan: `docs/superpowers/plans/2026-10-25-swarm-htcondor-layer.md`
+(8 tasks); execute it once the owner has reviewed it. Covers: governor (cgroup caps on `condor.service/htcondor`), liveness/invalidate loop,
 `swarm.toml` → submit translator, `swarm` user, skill.
 
 ## Spike plan (done, kept for reference)
