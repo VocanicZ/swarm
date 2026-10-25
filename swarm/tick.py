@@ -1,7 +1,7 @@
 """Coordinator tick (root, 1/min): invalidate dead workers' ads, publish coordinator free CPU."""
 import json
+import os
 import re
-import socket
 import subprocess
 import sys
 import tempfile
@@ -13,27 +13,19 @@ from swarm.governor import CG
 CONF = Path("/etc/swarm/coordinator.conf")
 STATE = Path("/var/lib/swarm/tick.json")
 ROOT_STAT = Path("/sys/fs/cgroup/cpu.stat")
-MAX_MISSES = 3
 
 
-def parse_addr(my_address: str) -> tuple[str, int]:
-    m = re.match(r"<([^:>?]+):(\d+)", my_address)
-    return m.group(1), int(m.group(2))
-
-
-def update_misses(misses: dict[str, int], alive: dict[str, bool]) -> tuple[dict[str, int], list[str]]:
-    new, dead = {}, []
-    for m, ok in alive.items():
-        n = 0 if ok else misses.get(m, 0) + 1
-        if n >= MAX_MISSES:
-            dead.append(m)
-            n = 0
-        new[m] = n
-    return new, dead
+def dead_machines(rows: list[tuple[str, int]], now: float, coord: str, max_age: float = 180) -> list[str]:
+    """Machines whose every slot was last heard from more than max_age s ago."""
+    newest: dict[str, float] = {}
+    for m, heard in rows:
+        if m != coord and isinstance(heard, (int, float)):
+            newest[m] = max(newest.get(m, heard), heard)
+    return sorted(m for m, h in newest.items() if now - h > max_age)
 
 
 def coord_free_cores(cpu_limit: float, total_usec: int, jobs_usec: int, dt_s: float) -> float:
-    return max(0, cpu_limit - (total_usec - jobs_usec) / 1e6 / dt_s)
+    return min(cpu_limit, max(0, cpu_limit - (total_usec - jobs_usec) / 1e6 / dt_s))
 
 
 def read_conf() -> dict[str, str]:
@@ -64,15 +56,9 @@ def run(*cmd: str) -> str | None:
     return r.stdout
 
 
-def reachable(addr: str) -> bool:
-    try:
-        with socket.create_connection(parse_addr(addr), timeout=3):
-            return True
-    except (OSError, AttributeError):
-        return False
-
-
 def invalidate(machine: str) -> bool:
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", machine):
+        return False
     ad = f'MyType = "Query"\nTargetType = "Machine"\nRequirements = TARGET.Machine == "{machine}"\n'
     with tempfile.NamedTemporaryFile("w", suffix=".ad") as f:
         f.write(ad)
@@ -91,18 +77,16 @@ def main() -> int:
         st = json.loads(STATE.read_text())
     except (OSError, ValueError):
         st = {}
-    misses = st.get("misses", {})
 
-    status = run("condor_status", "-af", "Machine", "MyAddress")
+    status = run("condor_status", "-af", "Machine", "LastHeardFrom")
     invalidated = False
-    if status is not None:  # on failure keep old counts rather than guess
-        alive = {}
+    if status is not None:
+        rows = []
         for line in status.splitlines():
-            parts = line.split(None, 1)
-            if len(parts) == 2 and parts[0] != coord:
-                alive[parts[0]] = alive.get(parts[0], False) or reachable(parts[1])
-        misses, dead = update_misses(misses, alive)
-        for m in dead:
+            parts = line.split()
+            if len(parts) == 2 and parts[1].isdigit():
+                rows.append((parts[0], int(parts[1])))
+        for m in dead_machines(rows, time.time(), coord):
             invalidated |= invalidate(m)
 
     now = time.time()
@@ -112,19 +96,21 @@ def main() -> int:
         print(f"cpu.stat: {e}", file=sys.stderr)
         total = jobs = None
     last = st.get("last")
-    if total is not None and last and now > last["t"]:
+    if total is not None and last and now > last["t"] and total >= last["total"] and jobs >= last["jobs"]:
         free = coord_free_cores(cpu_limit, total - last["total"], jobs - last["jobs"], now - last["t"])
         run("condor_qedit", "-constraint", "SwarmJob =!= undefined && JobStatus == 1",
             "SwarmCoordRate", f"{free:.1f}")
     if invalidated:
         run("condor_reschedule")
 
-    new = {"misses": misses}
+    new = {}
     if total is not None:
         new["last"] = {"t": now, "total": total, "jobs": jobs}
     try:
         STATE.parent.mkdir(parents=True, exist_ok=True)
-        STATE.write_text(json.dumps(new))
+        tmp = STATE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(new))
+        os.replace(tmp, STATE)
     except OSError as e:
         print(f"state: {e}", file=sys.stderr)
     return 0
