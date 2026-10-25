@@ -1,0 +1,3 @@
+.superpowers/
+__pycache__/
+tests/e2e/toy/merged.txt

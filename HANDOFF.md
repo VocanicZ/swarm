@@ -1,37 +1,23 @@
 # Handoff — 2026-10-25
 
-**State:** design approved (`docs/superpowers/specs/2026-10-25-swarm-design.md`, read the Addendum).
-**HTCondor spike done 2026-10-25: PASS** — see `spike/RESULTS.md` (gotchas list = requirements for the
-swarm layer). HTCondor 25.14.1 is still installed and running on both machines (claude: CM+submit+execute,
-`NUM_CPUS = 2`, config in `spike/claude-99-swarm-spike.config`; desktop: execute). Pool password:
-`~/.config/swarm/pool-password` on the desktop.
+**State (2026-10-25):** v1 built on branch `v1-layer` (plan `docs/superpowers/plans/2026-10-25-swarm-htcondor-layer.md`,
+all 8 tasks reviewed; final whole-branch review fixes applied) and **deployed live**:
+- coordinator = claude (LXC 9901): installed from a root-owned snapshot (`/root/swarm-src`, `install.sh coordinator --cpu-limit 32`).
+  NUM_CPUS 32, MEMORY 65536, condor.service CPUWeight=idle, jobs nice 19, `swarm-tick.timer` every 60 s, skill in
+  `~claude/.claude/skills/swarm`. Redeploy: `git archive` HEAD → pct push → `install.sh coordinator --cpu-limit 32` (see git log).
+- worker = desktop: `sudo bash ~/swarm/install.sh worker 192.168.1.111` (owner sudo). Governor `swarm-governor.service`,
+  shards run as `swarm`, `systemctl stop condor` is instant.
 
-## Next step
-Route approved by owner (HTCondor + thin layer). Plan: `docs/superpowers/plans/2026-10-25-swarm-htcondor-layer.md`
-(8 tasks); execute it once the owner has reviewed it. Covers: governor (cgroup caps on `condor.service/htcondor`), liveness/invalidate loop,
-`swarm.toml` → submit translator, `swarm` user, skill.
+**Acceptance (live):** kill test PASS (stop 0.015 s; desktop shards resumed on claude from last checkpoint; merged output
+identical). CPU caps PASS (12 → 5 cores within 3 s under owner load; recover after 30 s calm). GPU: VRAM tracking PASS;
+high-utilisation stop path **not yet exercised** (try with a game: `/run/swarm/gpu.json` should go `ok: false` in ~5 s).
 
-## Spike plan (done, kept for reference)
-
-Goal: prove HTCondor's self-checkpointing + resume-elsewhere works between the two machines.
-
-1. Install HTCondor 25.x (official apt repo) on:
-   - **coordinator** = claude machine: Proxmox LXC 9901 on pvebig, `ssh claude` (Tailscale
-     100.119.103.87, LAN 192.168.1.111). Debian, Python 3.13, 64 threads, Proxmox cpulimit 32
-     (owner rule: never raise). No GPU. `claude` user has no passwordless sudo: get root via
-     `ssh root@192.168.1.100 'pct exec 9901 -- …'`. Runs Harness fleets — do not disturb them.
-   - **worker** = owner's desktop (this repo's machine, Ubuntu, 20 threads, 125 GB, RTX 3060 Ti 8 GB,
-     LAN 192.168.1.123 on a 100 Mb/s link). Needs owner's sudo: ask them to run commands with `! `.
-   Role: claude = central manager + submit + execute; desktop = execute only.
-2. Toy job: counts to N, writes progress file atomically every ~minute, exits with the checkpoint
-   exit code; submit with checkpoint file transfer. Verify with current HTCondor docs that the
-   feature names are right (not verified yet).
-3. Kill the desktop worker mid-run (stop condor service / pull network). Pass = job resumes on
-   claude from the last checkpoint, not from zero.
-4. Check: jobs land in a cgroup slice on the desktop whose CPUQuota/MemoryHigh we can set at runtime
-   with the desktop policy (suspend/vacate) disabled.
-5. Report to owner: pass/fail + how heavy the setup was → choose route (HTCondor + thin layer, or
-   own build per the design). Then `superpowers:writing-plans`.
+## Open items
+- Merge `v1-layer` → `main` (owner decision).
+- Untested risk: condor.service CPUWeight=idle on claude also idles the schedd/collector; under full Harness load
+  worker leases (180 s) might lapse → watch `NumJobStarts` on worker shards when claude is saturated.
+- Deferred (v1): tail duplicates, measured link rate, output bytes in move cost; `build()` double-failure can lose `.prev`.
+- First real user: hg2 power-fit `swarm.toml` when a new fit loop is needed.
 
 ## Owner rules to keep
 - Owner's own use always wins: swarm cap = 100% − owner use − 10% (CPU, RAM, GPU separately).

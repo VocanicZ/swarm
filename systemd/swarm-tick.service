@@ -1,0 +1,7 @@
+[Unit]
+Description=swarm coordinator tick (dead-worker invalidation, coordinator rate)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/swarm
+ExecStart=/usr/bin/python3 -m swarm.tick
