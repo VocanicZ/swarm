@@ -19,6 +19,7 @@ if [[ ${1:-} == update || -z ${BASH_SOURCE[0]:-} ]]; then
     set -- "${saved[@]}"
   fi
   src=$(mktemp -d /var/tmp/swarm-src.XXXXXX)
+  chmod 755 "$src"  # mktemp makes it 0700; rsync would copy that onto /opt/swarm
   curl -fsSL "$SRC_URL" | tar -xz -C "$src" --strip-components=1
   exec bash "$src/install.sh" "$@"
 fi
