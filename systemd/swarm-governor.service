@@ -1,0 +1,13 @@
+[Unit]
+Description=swarm worker governor (caps swarm jobs to 100% - owner use - 10%)
+Before=condor.service
+
+[Service]
+WorkingDirectory=/opt/swarm
+ExecStart=/usr/bin/python3 -m swarm.governor
+Restart=always
+RuntimeDirectory=swarm
+RuntimeDirectoryPreserve=yes
+
+[Install]
+WantedBy=multi-user.target
