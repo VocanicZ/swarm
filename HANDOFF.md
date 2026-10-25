@@ -13,7 +13,7 @@ identical). CPU caps PASS (12 → 5 cores within 3 s under owner load; recover a
 high-utilisation stop path **not yet exercised** (try with a game: `/run/swarm/gpu.json` should go `ok: false` in ~5 s).
 
 ## Open items
-- Merge `v1-layer` → `main` (owner decision).
+- (done) v1-layer merged to main 2026-10-25.
 - Untested risk: condor.service CPUWeight=idle on claude also idles the schedd/collector; under full Harness load
   worker leases (180 s) might lapse → watch `NumJobStarts` on worker shards when claude is saturated.
 - Deferred (v1): tail duplicates, measured link rate, output bytes in move cost; `build()` double-failure can lose `.prev`.
