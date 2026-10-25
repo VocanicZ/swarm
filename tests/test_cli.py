@@ -63,7 +63,10 @@ if __name__ == "__main__":
 class Wait(unittest.TestCase):
     def run_wait(self, states, timeout=None):
         argv = ["wait", "j"] + (["--timeout", str(timeout)] if timeout is not None else [])
-        with mock.patch.object(cli, "merge_state", side_effect=states), \
+        d = tempfile.TemporaryDirectory()
+        self.addCleanup(d.cleanup)
+        (Path(d.name) / "j").mkdir()
+        with mock.patch.object(cli, "ROOT", Path(d.name)), mock.patch.object(cli, "merge_state", side_effect=states), \
              mock.patch.object(cli.time, "sleep"), mock.patch.object(cli.time, "monotonic", side_effect=range(0, 10000, 30)):
             return cli.main(argv)
 
@@ -86,3 +89,15 @@ class Update(unittest.TestCase):
         with mock.patch.object(cli.os, "execvp") as ex:
             cli.main(["update"])
         ex.assert_called_once_with("sudo", ["sudo", cli._install_sh(), "update"])
+
+
+class WaitMissing(unittest.TestCase):
+    def test_missing_job(self):
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(cli, "ROOT", Path(d)), \
+             redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["wait", "nope"]), 2)
+
+    def test_update_as_root_skips_sudo(self):
+        with mock.patch.object(cli.os, "geteuid", return_value=0), mock.patch.object(cli.os, "execvp") as ex:
+            cli.main(["update"])
+        ex.assert_called_once_with(cli._install_sh(), [cli._install_sh(), "update"])

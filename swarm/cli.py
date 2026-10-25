@@ -101,6 +101,8 @@ def main(argv):
         elif a.cmd in ("cancel", "wait") and not NAME_RE.fullmatch(a.name):
             raise SpecError(f"bad name: {a.name!r}")
         elif a.cmd == "wait":
+            if not (ROOT / a.name).is_dir():
+                raise SpecError(f"no such job: {a.name}")
             return wait(a.name, a.timeout)
         elif a.cmd == "cancel":
             return subprocess.run(["condor_rm", "-constraint", f'JobBatchName == "{a.name}"']).returncode
@@ -113,7 +115,8 @@ def main(argv):
                 args += ["--link-mbps", str(a.link_mbps)]
             os.execvp("sudo", args)
         elif a.cmd == "update":
-            os.execvp("sudo", ["sudo", _install_sh(), "update"])
+            cmd = [_install_sh(), "update"]
+            os.execvp(*((cmd[0], cmd) if os.geteuid() == 0 else ("sudo", ["sudo", *cmd])))
         elif a.cmd == "leave":
             return subprocess.run(["sudo", "systemctl", "disable", "--now", "swarm-governor", "condor"]).returncode
     except SpecError as e:
