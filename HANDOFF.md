@@ -13,6 +13,10 @@ identical). CPU caps PASS (12 → 5 cores within 3 s under owner load; recover a
 high-utilisation stop path **not yet exercised** (try with a game: `/run/swarm/gpu.json` should go `ok: false` in ~5 s).
 
 ## Open items
+- Native support in flight (Harness fleet `harness-dev`): VocanicZ/Harness#202 (lanes offload suites via
+  `scripts/swarm-suite.sh`, `HARNESS_SWARM=auto`), VocanicZ/rtdd#512 (`rtdd which --swarm-job`).
+- vocanicz-ai-tools PR #6 adds a `swarm` installer feature (open, unmerged).
+- Install/update: one-liner curl (README) saves `/etc/swarm/install.args`; `sudo swarm update` thereafter.
 - (done) v1-layer merged to main 2026-10-25.
 - Untested risk: condor.service CPUWeight=idle on claude also idles the schedd/collector; under full Harness load
   worker leases (180 s) might lapse → watch `NumJobStarts` on worker shards when claude is saturated.
