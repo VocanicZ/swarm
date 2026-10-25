@@ -47,6 +47,8 @@ class JobSpecTest(unittest.TestCase):
 
     def test_bad_name(self):
         self.check_err(base=BASE.replace('"j"', '"a b"'))
+        self.check_err(base=BASE.replace('"j"', '"x\\n"'))  # `$` would match before a trailing newline
+        self.check_err(base=BASE.replace('"j"', '"x.prev"'))  # reserved for a resubmitted job's old state
 
     def test_missing_workdir(self):
         self.check_err('workdir = "nope"\n')

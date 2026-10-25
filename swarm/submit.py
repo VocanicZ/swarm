@@ -31,7 +31,11 @@ def split(spec: JobSpec) -> list[str]:
 
 def build(spec: JobSpec, shards: list[str], statedir: Path) -> Path:
     statedir = Path(statedir)
-    shutil.rmtree(statedir, ignore_errors=True)
+    if statedir.exists():  # keep the last run (incl. finished outs) one generation back
+        prev = statedir.with_name(statedir.name + ".prev")
+        if prev.exists():
+            shutil.rmtree(prev)
+        statedir.rename(prev)
     statedir.mkdir(parents=True)
     tarball = statedir / "workdir.tar.gz"
     cmd = ["tar", "-czf", str(tarball)]
@@ -98,7 +102,13 @@ queue shard from shards.txt
 def submit(jobdir: Path, state_root: Path = Path.home() / ".swarm/jobs") -> str:
     spec = load(jobdir)
     shards = split(spec)
-    q = subprocess.run(["condor_q", "-af", "JobBatchName"], capture_output=True, text=True)
+    try:
+        q = subprocess.run(["condor_q", "-af", "JobBatchName"], capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise SpecError(f"condor_q failed, cannot tell if {spec.name!r} is queued: {e}") from e
+    if q.returncode:  # schedd down: empty output must not read as "not queued"
+        raise SpecError(f"condor_q failed (exit {q.returncode}), cannot tell if {spec.name!r} is queued: "
+                        f"{q.stderr.strip()}")
     if spec.name in q.stdout.split():
         raise SpecError(f"job {spec.name!r} already in the queue")
     statedir = Path(state_root) / spec.name

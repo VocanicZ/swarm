@@ -120,6 +120,35 @@ class T(unittest.TestCase):
                 submit.submit(d, Path(tempfile.mkdtemp()))
             b.assert_not_called()
 
+    def test_condor_q_failure_refuses(self):
+        # schedd down: empty stdout must not look like "not queued" -> no build (which moves the state dir)
+        d = mkjob()
+        for effect in (subprocess.CompletedProcess([], 1, stdout="", stderr="cannot reach schedd"),
+                       FileNotFoundError("condor_q"), subprocess.TimeoutExpired("condor_q", 60)):
+            with self.subTest(effect=effect), mock.patch("swarm.submit.split", return_value=["a"]), \
+                    mock.patch("swarm.submit.subprocess.run",
+                               **({"return_value": effect} if isinstance(effect, subprocess.CompletedProcess)
+                                  else {"side_effect": effect})), \
+                    mock.patch("swarm.submit.build") as b:
+                with self.assertRaises(jobspec.SpecError) as c:
+                    submit.submit(d, Path(tempfile.mkdtemp()))
+                self.assertIn("condor_q", str(c.exception))
+                b.assert_not_called()
+
+    def test_rebuild_keeps_previous_state(self):
+        spec = jobspec.load(mkjob())
+        prev = self.state.with_name("st.prev")
+        submit.build(spec, ["a"], self.state)
+        (self.state / "shards/a/out").mkdir()
+        (self.state / "shards/a/out/x").write_text("1")
+        submit.build(spec, ["a"], self.state)
+        self.assertEqual((prev / "shards/a/out/x").read_text(), "1")
+        self.assertFalse((self.state / "shards/a/out").exists())
+        (self.state / "marker").write_text("2")
+        submit.build(spec, ["a"], self.state)  # an older .prev is replaced
+        self.assertTrue((prev / "marker").exists())
+        self.assertFalse((prev / "shards/a/out").exists())
+
 
 if __name__ == "__main__":
     unittest.main()

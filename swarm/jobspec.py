@@ -3,8 +3,8 @@ import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
-NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
-SHARD_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]*")  # always .fullmatch: `$` matches before "\n"
+SHARD_RE = re.compile(r"[A-Za-z0-9._-]+")
 
 REQUIRED = ("name", "split", "run", "merge")
 OPTIONAL = ("workdir", "gpu", "vram_mb", "threads", "mem_mb", "setup", "check", "save_seconds")
@@ -57,7 +57,7 @@ def load(jobdir: Path) -> JobSpec:
     for k in REQUIRED:
         if _str(d, k) is None:
             raise SpecError(f"missing required key: {k}")
-    if not NAME_RE.match(d["name"]):
+    if not NAME_RE.fullmatch(d["name"]) or d["name"].endswith(".prev"):  # <name>.prev = old state dir
         raise SpecError(f"bad name: {d['name']!r}")
     if "{out}" not in d["run"]:
         raise SpecError("run must contain {out}")

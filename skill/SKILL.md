@@ -20,7 +20,7 @@ at any moment. Placement is a plain formula over HTCondor; it costs no AI tokens
 
 ```toml
 name    = "hg2-power-fit-v4i"
-workdir = "."                      # synced to workers (rsync, excludes from .swarmignore)
+workdir = "."                      # tarred at submit (minus .swarmignore); HTCondor ships it
 gpu     = "optional"               # "no" | "optional" | "required"
 vram_mb = 2000                     # GPU memory a GPU shard needs (gpu != "no")
 threads = 4                        # per shard
@@ -37,8 +37,9 @@ save_seconds = 3600                # optional: checkpoint interval (default 3600
   Any other key is rejected.
 - **Defaults:** `workdir="."`, `gpu="no"`, `threads=1`, `mem_mb=1024`, `save_seconds=3600`.
   `vram_mb` is required when `gpu` is not `"no"`.
-- `name` must match `[A-Za-z0-9][A-Za-z0-9._-]*`. Each shard id printed by `split` must match
-  `[A-Za-z0-9._-]+`, and ids must be unique. Otherwise `swarm submit` fails.
+- `name` must match `[A-Za-z0-9][A-Za-z0-9._-]*` and must not end in `.prev`. Each shard id
+  printed by `split` must match `[A-Za-z0-9._-]+`, and ids must be unique. Otherwise
+  `swarm submit` fails.
 - `workdir` is packed into a tarball **at submit time**, honouring `.swarmignore`, which is a tar
   exclude list. Edits made after submitting do not reach running shards. Keep it small: a large
   input makes slow-link workers lose the placement formula.
@@ -75,7 +76,7 @@ save_seconds = 3600                # optional: checkpoint interval (default 3600
 
 | Command | Effect |
 |---|---|
-| `swarm submit <jobdir>` | Validate, split, pack, and queue. Refused while the job's name is still queued. A resubmit **replaces** the old state dir in `~/.swarm/jobs/<name>/`, including its outs. |
+| `swarm submit <jobdir>` | Validate, split, pack, and queue. Refused while the job's name is still queued (or if `condor_q` fails). A resubmit starts fresh: the old state dir `~/.swarm/jobs/<name>/`, outs included, moves to `~/.swarm/jobs/<name>.prev/`, replacing any older `.prev`. |
 | `swarm status [name]` | Show progress for all jobs, or for one. |
 | `swarm cancel <name>` | Remove all of the job's queued and running shards and the merge. |
 | `swarm workers` | Print one row per slot: `Machine State Cpus SwarmCapCores SwarmGpuFreeMB`. |
@@ -90,7 +91,8 @@ hg2-power-fit-v4i: 37/200 done, 12 running (claude, NathanielSong), 151 idle
 
 - `done` counts shards whose `out` is back on the coordinator. `running` lists the hosts that
   have shards now. `idle` is queued, waiting for a slot that passes the placement formula.
-- `merge: done` means the merge ran. Its output is in the job dir, and its logs are in
+- `merge: done` means the merge exited 0. `merge: failed` means it exited non-zero, or the DAG
+  failed first (a shard ran out of retries). Its output is in the job dir, and its logs are in
   `~/.swarm/jobs/<name>/merge.{out,err}`.
 - A shard's stdout and stderr are in `~/.swarm/jobs/<name>/shards/<id>/run.{out,err}`.
 - If shards stay idle, check `swarm workers`. A worker whose `SwarmCapCores` is 0 or `undefined`
