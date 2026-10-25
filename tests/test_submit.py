@@ -66,7 +66,8 @@ class T(unittest.TestCase):
         merge = (self.state / "merge.sh").read_text()
         outs = " ".join(f"{s}/shards/{i}/out" for i in "abc")
         self.assertIn(outs, merge)
-        self.assertIn(f"cd {spec.jobdir}", merge)
+        self.assertIn(f"cd {spec.jobdir} && cat ", merge)
+        self.assertNotIn("exec", merge)
         for i in "abc":
             self.assertTrue((self.state / "shards" / i).is_dir())
         self.assertEqual((self.state / "shards.txt").read_text().split(), ["a", "b", "c"])

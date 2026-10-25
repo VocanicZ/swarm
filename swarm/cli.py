@@ -24,9 +24,14 @@ def _q(*args):
     return [l.split() for l in r.stdout.splitlines() if l.strip()]
 
 
+def shard_rows(lines):
+    # DAGMan and the local merge job share JobBatchName but have no SwarmJob
+    return [(r[0], int(r[1]), r[2]) for r in lines
+            if len(r) >= 4 and r[1].isdigit() and r[3] != "undefined"]
+
+
 def status(name=None):
-    rows = [(r[0], int(r[1]), r[2] if len(r) > 2 else "") for r in _q("JobBatchName", "JobStatus", "RemoteHost")
-            if r[1].isdigit()]
+    rows = shard_rows(_q("JobBatchName", "JobStatus", "RemoteHost", "SwarmJob"))
     names = [name] if name else sorted(p.name for p in ROOT.glob("*") if p.is_dir())
     for n in names:
         d = ROOT / n
