@@ -1,6 +1,8 @@
 import contextlib
 import json
 import os
+import subprocess
+import sys
 import tarfile
 import tempfile
 import threading
@@ -12,6 +14,9 @@ from unittest import mock
 os.environ["SWARM_POLL_SECONDS"] = "0.2"
 from swarm import shard  # noqa: E402
 
+VERSION = "0123456789abcdef"
+ROOT = Path(__file__).resolve().parent.parent
+
 
 class ShardTest(unittest.TestCase):
     def setUp(self):
@@ -20,6 +25,7 @@ class ShardTest(unittest.TestCase):
         self.run_dir.mkdir()
         (self.run_dir / "gpu0.lock").touch(mode=0o666)
         self.enterContext(mock.patch.dict(os.environ, {"SWARM_RUN_DIR": str(self.run_dir)}))
+        (self.tmp / "markers").mkdir()  # stands in for /var/tmp, which always exists
         self.enterContext(mock.patch.object(shard, "MARKER_ROOT", self.tmp / "markers"))
         self.n = 0
 
@@ -34,7 +40,7 @@ class ShardTest(unittest.TestCase):
         with tarfile.open(box / "workdir.tar.gz", "w:gz") as t:
             t.add(src, arcname=".")
         spec = {"run": "sh run.sh {shard} {out}", "check": None, "setup": None,
-                "gpu": "no", "vram_mb": 0, "save_seconds": 60, "version": "v1"}
+                "gpu": "no", "vram_mb": 0, "save_seconds": 60, "version": VERSION}
         spec.update(job)
         (box / "job.json").write_text(json.dumps(spec))
         self.enterContext(contextlib.chdir(box))
@@ -112,13 +118,52 @@ class ShardTest(unittest.TestCase):
         self.assertEqual((box / "out/mode").read_text(), "1 0\n")
 
     def test_gpu_revoked_restarts_on_cpu(self):
+        # The GPU run ignores SIGTERM: revoke must SIGKILL at once, not wait KILL_GRACE.
         self.set_gpu(True)
-        box = self.sandbox('echo "$SWARM_GPU" >> "$2/mode"\nsleep 30\n',
+        box = self.sandbox('[ "$SWARM_GPU" = 1 ] && trap "" TERM\n'
+                           'echo "$SWARM_GPU" >> "$2/mode"\nsleep 30\n',
                            gpu="optional", vram_mb=1000, save_seconds=2)
         threading.Timer(0.5, self.set_gpu, [False]).start()
+        t = time.monotonic()
         self.assertEqual(shard.main(["s1"]), 85)
+        self.assertLess(time.monotonic() - t, 5)  # 3 s hard limit + slack, far under KILL_GRACE
         self.assertEqual((box / "out/mode").read_text(), "1\n0\n")
 
+    def setup_job(self, setup="touch $HOME_OK; echo x >> $COUNT"):
+        self.ok, self.count = self.tmp / "ok", self.tmp / "count"
+        self.enterContext(mock.patch.dict(
+            os.environ, {"HOME_OK": str(self.ok), "COUNT": str(self.count)}))
+        return dict(check="test -f $HOME_OK", setup=setup)
+
+    def test_unsafe_marker_dir_ignored(self):
+        d = shard.MARKER_ROOT / f"swarm-setup-{os.getuid()}"
+        d.mkdir(parents=True)
+        d.chmod(0o777)
+        (d / VERSION).touch()  # planted marker must not skip setup
+        self.sandbox("exit 0\n", **self.setup_job())
+        self.assertEqual(shard.main(["s1"]), 0)
+        self.assertEqual(self.count.read_text().splitlines(), ["x"])
+
+    def test_bad_version_no_marker(self):
+        self.sandbox("exit 0\n", version="../evil", **self.setup_job())
+        self.assertEqual(shard.main(["s1"]), 0)
+        self.assertEqual(self.count.read_text().splitlines(), ["x"])
+        made = [p for p in self.tmp.rglob("*") if p.is_file() and p.name != ".lock"
+                and shard.MARKER_ROOT in p.parents]
+        self.assertEqual(made, [])
+        self.assertFalse((self.tmp / "evil").exists())
+
+    def test_setup_once_concurrent(self):
+        job = self.setup_job("sleep 0.5; echo x >> $COUNT; touch $HOME_OK")
+        code = (f"import sys; sys.path.insert(0, {str(ROOT)!r}); from pathlib import Path; "
+                f"from swarm import shard; shard.MARKER_ROOT = Path({str(shard.MARKER_ROOT)!r}); "
+                "sys.exit(shard.main(['s1']))")
+        procs = []
+        for _ in range(2):
+            box = self.sandbox("exit 0\n", **job)
+            procs.append(subprocess.Popen([sys.executable, "-c", code], cwd=box))
+        self.assertEqual([p.wait(30) for p in procs], [0, 0])
+        self.assertEqual(self.count.read_text().splitlines(), ["x"])
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,8 +7,10 @@ Exit codes: 0 done, 85 checkpoint, 86 machine unfit, else the run's own code.
 import fcntl
 import json
 import os
+import re
 import shlex
 import signal
+import stat
 import subprocess
 import sys
 import tarfile
@@ -24,15 +26,38 @@ def sh(cmd, cwd):
     return subprocess.run(["sh", "-c", cmd], cwd=cwd).returncode == 0
 
 
+def marker_dir():
+    """Our private setup-marker dir, or None if it can't be trusted (foreign/shared/odd)."""
+    d = MARKER_ROOT / f"swarm-setup-{os.getuid()}"
+    try:
+        d.mkdir(mode=0o700, exist_ok=True)
+        st = os.lstat(d)
+    except OSError:
+        return None
+    if not stat.S_ISDIR(st.st_mode) or st.st_uid != os.getuid() or st.st_mode & 0o022:
+        return None
+    return d
+
+
 def fit(job, work):
-    """check; on failure run setup once per version, then re-check."""
-    if not job.get("check") or sh(job["check"], work):
+    """check; on failure run setup once per version (flock'd across slots), then re-check."""
+    check, setup = job.get("check"), job.get("setup")
+    if not check or sh(check, work):
         return True
-    marker = MARKER_ROOT / f"swarm-setup-{os.getuid()}" / str(job["version"])
-    if job.get("setup") and not marker.exists() and sh(job["setup"], work):
-        marker.parent.mkdir(parents=True, exist_ok=True)
-        marker.touch()
-    return sh(job["check"], work)
+    if setup:
+        version = str(job.get("version", ""))
+        d = marker_dir() if re.fullmatch(r"[0-9a-f]{16}", version) else None
+        if d is None:
+            sh(setup, work)  # untrusted marker store: always set up, never mark
+        else:
+            fd = os.open(d / ".lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+            try:
+                fcntl.flock(fd, fcntl.LOCK_EX)  # another slot may be mid-setup
+                if not (d / version).exists() and sh(setup, work):
+                    (d / version).touch()
+            finally:
+                os.close(fd)
+    return sh(check, work)
 
 
 def gpu_ok(job, run_dir):
@@ -70,15 +95,17 @@ def newest_mtime(out):
     return m
 
 
-def kill(p):
-    """SIGTERM the run's process group; SIGKILL whatever is left of it after KILL_GRACE.
+def kill(p, grace=KILL_GRACE):
+    """SIGTERM the run's process group; SIGKILL whatever is left of it after `grace`.
+    grace=0 SIGKILLs at once.
 
     Waits on the whole group, not just the leader: `sh -c` may die at once while
     the real work below it is still finishing its save.
     """
-    deadline = time.monotonic() + KILL_GRACE
+    deadline = time.monotonic() + grace
     try:
-        os.killpg(p.pid, signal.SIGTERM)
+        if grace:
+            os.killpg(p.pid, signal.SIGTERM)
         while time.monotonic() < deadline:
             p.poll()  # reap the leader so a zombie doesn't keep the group alive
             os.killpg(p.pid, 0)
@@ -124,15 +151,15 @@ def main(argv):
                     rc = p.returncode
                     return rc if rc >= 0 else 128 - rc
                 if gpu and not gpu_ok(job, run_dir):
-                    kill(p)
+                    kill(p, grace=0)  # free VRAM immediately
                     break  # back to GPU selection; ./out is kept
                 now = time.time()
                 if now >= save_at and (newest_mtime(out) > save_at or now >= save_at + save * 0.5):
                     kill(p)
                     return 85
         finally:
-            if p.returncode is None:
-                kill(p)
+            if p.returncode is None:  # unexpected exit path: don't leave the run behind
+                kill(p, grace=0)
             if lock is not None:
                 os.close(lock)
 
