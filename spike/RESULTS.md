@@ -1,7 +1,7 @@
 # HTCondor spike — 2026-10-25: PASS
 
-Pool: claude (LXC 9901, 192.168.1.111) = central manager + submit + execute (`NUM_CPUS = 2` for the
-spike); desktop (192.168.1.123) = execute. HTCondor 25.14.1 from `get.htcondor.org` on both
+Pool: claude (LXC 9901, 10.0.0.1) = central manager + submit + execute (`NUM_CPUS = 2` for the
+spike); desktop (10.0.0.2) = execute. HTCondor 25.14.1 from `get.htcondor.org` on both
 (Debian 13 trixie, Ubuntu 24.04 noble are supported).
 
 ## Results

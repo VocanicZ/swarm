@@ -79,13 +79,14 @@ save_seconds = 3600                # optional: checkpoint interval (default 3600
 | `swarm submit <jobdir>` | Validate, split, pack, and queue. Refused while the job's name is still queued (or if `condor_q` fails). A resubmit starts fresh: the old state dir `~/.swarm/jobs/<name>/`, outs included, moves to `~/.swarm/jobs/<name>.prev/`, replacing any older `.prev`. |
 | `swarm status [name]` | Show progress for all jobs, or for one. |
 | `swarm cancel <name>` | Remove all of the job's queued and running shards and the merge. |
+| `swarm wait <name> [--timeout S]` | Block until the merge finishes. Exit 0 = merged output ready, 1 = failed, 124 = timed out. Use this from scripts and other tools. |
 | `swarm workers` | Print one row per slot: `Machine State Cpus SwarmCapCores SwarmGpuFreeMB`. |
-| `swarm join <coord-ip> [--link-mbps N]` / `swarm leave` | Add this machine as a worker, or remove it (needs sudo; owner only). |
+| `swarm join <coord-ip> [--link-mbps N]` / `swarm leave` / `swarm update` | Add this machine as a worker, remove it, or update it to the latest main (needs sudo; owner only). |
 
 Reading `swarm status`:
 
 ```
-hg2-power-fit-v4i: 37/200 done, 12 running (claude, NathanielSong), 151 idle
+hg2-power-fit-v4i: 37/200 done, 12 running (claude, worker1), 151 idle
   merge: pending
 ```
 

@@ -5,7 +5,7 @@ all 8 tasks reviewed; final whole-branch review fixes applied) and **deployed li
 - coordinator = claude (LXC 9901): installed from a root-owned snapshot (`/root/swarm-src`, `install.sh coordinator --cpu-limit 32`).
   NUM_CPUS 32, MEMORY 65536, condor.service CPUWeight=idle, jobs nice 19, `swarm-tick.timer` every 60 s, skill in
   `~claude/.claude/skills/swarm`. Redeploy: `git archive` HEAD → pct push → `install.sh coordinator --cpu-limit 32` (see git log).
-- worker = desktop: `sudo bash ~/swarm/install.sh worker 192.168.1.111` (owner sudo). Governor `swarm-governor.service`,
+- worker = desktop: `sudo bash ~/swarm/install.sh worker 10.0.0.1` (owner sudo). Governor `swarm-governor.service`,
   shards run as `swarm`, `systemctl stop condor` is instant.
 
 **Acceptance (live):** kill test PASS (stop 0.015 s; desktop shards resumed on claude from last checkpoint; merged output

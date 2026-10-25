@@ -3,7 +3,7 @@
 set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 toy=$here/toy
-worker=NathanielSong
+worker=${SWARM_E2E_WORKER:?set SWARM_E2E_WORKER to the worker Machine name (condor_status -af Machine)}
 rm -f "$toy/merged.txt"
 
 swarm submit "$toy"

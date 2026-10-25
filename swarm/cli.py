@@ -3,6 +3,7 @@ import os
 import re
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 from swarm.jobspec import NAME_RE, SpecError
@@ -58,6 +59,18 @@ def status(name=None):
         print(f"  merge: {merge_state(d)}")
 
 
+def wait(name, timeout=None, poll=30):
+    """Block until the job's merge finishes: 0 done, 1 failed, 124 timed out."""
+    start = time.monotonic()
+    while True:
+        state = merge_state(ROOT / name)
+        if state != "pending":
+            return 0 if state == "done" else 1
+        if timeout is not None and time.monotonic() - start >= timeout:
+            return 124
+        time.sleep(poll)
+
+
 def _install_sh():
     p = Path("/opt/swarm/install.sh")
     return str(p if p.parent.exists() else Path(__file__).resolve().parent.parent / "install.sh")
@@ -74,6 +87,10 @@ def main(argv):
     j.add_argument("coord_ip")
     j.add_argument("--link-mbps", type=int)
     sub.add_parser("leave")
+    sub.add_parser("update")
+    w = sub.add_parser("wait")
+    w.add_argument("name")
+    w.add_argument("--timeout", type=float)
     a = ap.parse_args(argv)
     try:
         if a.cmd == "submit":
@@ -81,9 +98,11 @@ def main(argv):
             print(submit.submit(Path(a.jobdir)))
         elif a.cmd == "status":
             status(a.name)
+        elif a.cmd in ("cancel", "wait") and not NAME_RE.fullmatch(a.name):
+            raise SpecError(f"bad name: {a.name!r}")
+        elif a.cmd == "wait":
+            return wait(a.name, a.timeout)
         elif a.cmd == "cancel":
-            if not NAME_RE.fullmatch(a.name):
-                raise SpecError(f"bad name: {a.name!r}")
             return subprocess.run(["condor_rm", "-constraint", f'JobBatchName == "{a.name}"']).returncode
         elif a.cmd == "workers":
             return subprocess.run(["condor_status", "-af", "Machine", "State", "Cpus", "SwarmCapCores",
@@ -93,6 +112,8 @@ def main(argv):
             if a.link_mbps:
                 args += ["--link-mbps", str(a.link_mbps)]
             os.execvp("sudo", args)
+        elif a.cmd == "update":
+            os.execvp("sudo", ["sudo", _install_sh(), "update"])
         elif a.cmd == "leave":
             return subprocess.run(["sudo", "systemctl", "disable", "--now", "swarm-governor", "condor"]).returncode
     except SpecError as e:

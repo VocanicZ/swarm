@@ -16,8 +16,8 @@ DAG_OK = "10/25/26 10:00:00 **** condor_dagman (condor_DAGMAN) pid 4242 EXITING 
 
 class T(unittest.TestCase):
     def test_summarize(self):
-        s = cli.summarize("j", 6, 2, [("j", 2, "slot1_1@NathanielSong"), ("j", 1, "undefined")])
-        for x in ("j", "2/6 done", "1 running", "NathanielSong", "1 idle"):
+        s = cli.summarize("j", 6, 2, [("j", 2, "slot1_1@worker1"), ("j", 1, "undefined")])
+        for x in ("j", "2/6 done", "1 running", "worker1", "1 idle"):
             self.assertIn(x, s)
 
     def test_shard_rows_excludes_non_shard(self):
@@ -58,3 +58,31 @@ class T(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class Wait(unittest.TestCase):
+    def run_wait(self, states, timeout=None):
+        argv = ["wait", "j"] + (["--timeout", str(timeout)] if timeout is not None else [])
+        with mock.patch.object(cli, "merge_state", side_effect=states), \
+             mock.patch.object(cli.time, "sleep"), mock.patch.object(cli.time, "monotonic", side_effect=range(0, 10000, 30)):
+            return cli.main(argv)
+
+    def test_done(self):
+        self.assertEqual(self.run_wait(["pending", "pending", "done"]), 0)
+
+    def test_failed(self):
+        self.assertEqual(self.run_wait(["pending", "failed"]), 1)
+
+    def test_timeout(self):
+        self.assertEqual(self.run_wait(["pending"] * 100, timeout=60), 124)
+
+    def test_bad_name(self):
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(cli.main(["wait", "../x"]), 2)
+
+
+class Update(unittest.TestCase):
+    def test_execs_install_update(self):
+        with mock.patch.object(cli.os, "execvp") as ex:
+            cli.main(["update"])
+        ex.assert_called_once_with("sudo", ["sudo", cli._install_sh(), "update"])

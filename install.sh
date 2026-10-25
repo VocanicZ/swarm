@@ -2,12 +2,26 @@
 # swarm installer. Run as root; idempotent.
 #   install.sh coordinator [--cpu-limit N] [--user NAME]
 #   install.sh worker <coord-ip> [--link-mbps N]
+#   install.sh update            (re-run with the saved role/args on the latest main)
+# Piped (curl ... | sudo bash -s -- <role> ...) it fetches main itself.
 set -euo pipefail
 
-usage() { echo "usage: $0 coordinator [--cpu-limit N] [--user NAME] | worker <coord-ip> [--link-mbps N]" >&2; exit 2; }
+usage() { echo "usage: $0 coordinator [--cpu-limit N] [--user NAME] | worker <coord-ip> [--link-mbps N] | update" >&2; exit 2; }
 die() { echo "install.sh: $*" >&2; exit 1; }
 
 [[ $EUID -eq 0 ]] || die "must run as root"
+SRC_URL=${SWARM_SRC_URL:-https://github.com/VocanicZ/swarm/archive/refs/heads/main.tar.gz}
+ARGS=/etc/swarm/install.args
+if [[ ${1:-} == update || -z ${BASH_SOURCE[0]:-} ]]; then
+  if [[ ${1:-} == update ]]; then
+    [[ -f $ARGS ]] || die "nothing to update: $ARGS missing (install first)"
+    mapfile -t saved < "$ARGS"
+    set -- "${saved[@]}"
+  fi
+  src=$(mktemp -d /var/tmp/swarm-src.XXXXXX)
+  curl -fsSL "$SRC_URL" | tar -xz -C "$src" --strip-components=1
+  exec bash "$src/install.sh" "$@"
+fi
 REPO=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CFG=/etc/condor/config.d
 
@@ -86,4 +100,12 @@ else
   systemctl restart swarm-governor  # restart, not start: picks up new code on re-install
   systemctl restart condor
 fi
+if [[ $role == coordinator ]]; then
+  saved=(coordinator --cpu-limit "$cpu_limit")
+  [[ -n $user ]] && saved+=(--user "$user")
+else
+  saved=(worker "$coord" --link-mbps "$link_mbps")
+fi
+printf '%s\n' "${saved[@]}" > "$ARGS"  # read back by `install.sh update` / `swarm update`
+[[ $REPO == /var/tmp/swarm-src.* ]] && rm -rf "$REPO"
 echo "swarm $role installed (IP $IP)"

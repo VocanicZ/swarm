@@ -257,7 +257,7 @@ CLI:
   - `test_swarmignore`: a file listed in `.swarmignore` is absent from `workdir.tar.gz`.
   - `test_split_rejects` (subTests): `split` printing `a b`, `../x`, `a\na` and empty output each → `SpecError`; the message contains the bad id (except for empty output).
   - `test_resubmit_refused`: patch `subprocess.run` so `condor_q` returns the name → `submit` raises `SpecError` and `build` is never called.
-  - `test_summarize` (`tests/test_cli.py`): `summarize("j", 6, 2, [("j",2,"slot1_1@NathanielSong"),("j",1,"undefined")])` contains `j`, `2/6 done`, `1 running`, `NathanielSong`, `1 idle`.
+  - `test_summarize` (`tests/test_cli.py`): `summarize("j", 6, 2, [("j",2,"slot1_1@worker1"),("j",1,"undefined")])` contains `j`, `2/6 done`, `1 running`, `worker1`, `1 idle`.
 - [ ] **Step 2:** `python3 -m unittest tests.test_submit tests.test_cli -v` → FAIL.
 - [ ] **Step 3: Implement `swarm/submit.py`, `swarm/cli.py`** (`argparse`).
 - [ ] **Step 4:** rerun → PASS; also `python3 -m unittest -v` (all tests).
@@ -343,7 +343,7 @@ Loop, every 2 s:
 7. Save state.
 
 - [ ] **Step 1: Write failing tests:**
-  - `test_parse_addr`: `"<192.168.1.123:9618?addrs=192.168.1.123-9618+[fd7a-115c-a1e0--6b34-b26e]-9618&alias=NathanielSong&noUDP&sock=startd_1_2>"` → `("192.168.1.123", 9618)`.
+  - `test_parse_addr`: `"<10.0.0.2:9618?addrs=10.0.0.2-9618+[fd7a-115c-a1e0--6b34-b26e]-9618&alias=worker1&noUDP&sock=startd_1_2>"` → `("10.0.0.2", 9618)`.
   - `test_update_misses`: three calls with `{"A": False, "B": True}` → `[]`, `[]`, `["A"]`, and the counts end at `{"A": 0, "B": 0}`. A call with A dead, then A alive → A's count is 0.
   - `test_coord_free_cores`: `(32, 20e6*60, 4e6*60, 60)` → `16.0`; `(32, 40e6*60, 0, 60)` → `0`.
 - [ ] **Step 2:** `python3 -m unittest tests.test_tick -v` → FAIL.
@@ -431,16 +431,16 @@ systemd units:
 - [ ] **Step 2: Deploy the coordinator:**
   ```
   ssh claude 'git clone git@github.com:VocanicZ/swarm.git ~/swarm || git -C ~/swarm pull'
-  ssh root@192.168.1.100 'pct exec 9901 -- env SUDO_USER=claude bash /home/claude/swarm/install.sh coordinator --cpu-limit 32'
+  ssh root@<proxmox-host> 'pct exec 9901 -- env SUDO_USER=claude bash /home/claude/swarm/install.sh coordinator --cpu-limit 32'
   ```
   Verify with `ssh claude 'condor_config_val NUM_CPUS MEMORY SCHEDD_INTERVAL; systemctl show condor -p CPUWeight; systemctl list-timers swarm-tick.timer'`.
   Expected: `32`, `65536` (±), `60`, `CPUWeight=idle`, timer listed.
 - [ ] **Step 3: Deploy the worker (owner runs it):**
   ```
-  ! sudo bash ~/swarm/install.sh worker 192.168.1.111
+  ! sudo bash ~/swarm/install.sh worker 10.0.0.1
   ```
-  Verify with `ssh claude 'condor_status -af Machine SwarmCapCores SwarmGpus SwarmGpuFreeMB'`: the `NathanielSong` row has numbers, not `undefined`, within 60 s.
-- [ ] **Step 4: Check the shard user.** Submit a 1-shard job whose `run` is `id -un > {out}/who` (requirement `TARGET.Machine == "NathanielSong"`, via a temporary edit of the generated `shards.sub`). `who` must contain `swarm`.
+  Verify with `ssh claude 'condor_status -af Machine SwarmCapCores SwarmGpus SwarmGpuFreeMB'`: the `worker1` row has numbers, not `undefined`, within 60 s.
+- [ ] **Step 4: Check the shard user.** Submit a 1-shard job whose `run` is `id -un > {out}/who` (requirement `TARGET.Machine == "worker1"`, via a temporary edit of the generated `shards.sub`). `who` must contain `swarm`.
   - If it says `nobody`, try `SLOT_TYPE_1_USER`-style knobs per the current HTCondor docs (`condor_config_val -dump | grep -i user`).
   - If nothing works, stop and report to the owner: `nobody` cannot read their 750 home, which may be acceptable.
 - [ ] **Step 5: Check instant stop.** Owner runs `! time sudo systemctl stop condor && sudo systemctl start condor` → `real` < 2 s.
@@ -476,7 +476,7 @@ Toy job:
 - `expected.txt` = the 6 sorted lines.
 - `e2e.sh` (runs on claude):
   1. `swarm submit tests/e2e/toy`.
-  2. Poll `swarm status toy` until a shard is running on `NathanielSong` and ≥1 checkpoint exists under `$(condor_config_val SPOOL)`. Then print `KILL WORKER NOW` and wait for the owner's step.
+  2. Poll `swarm status toy` until a shard is running on `worker1` and ≥1 checkpoint exists under `$(condor_config_val SPOOL)`. Then print `KILL WORKER NOW` and wait for the owner's step.
   3. Poll until `merged.txt` exists (timeout 30 min).
   4. `diff merged.txt expected.txt` → exit 0.
 

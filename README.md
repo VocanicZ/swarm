@@ -1,4 +1,10 @@
-# swarm
+<p align="center">
+  <img src="docs/logo.svg" alt="swarm logo" width="128" height="128">
+</p>
+
+<h1 align="center">swarm</h1>
+
+<p align="center"><em>Spare machines join as workers; the owner's own use always wins.</em></p>
 
 Spare Linux machines become workers for an always-on coordinator. A project describes a job once in
 `swarm.toml` (split, resumable run, merge). Its shards then run across the coordinator and any
@@ -13,41 +19,33 @@ tick. No pip dependencies, and no AI calls in any control loop.
 
 ## Install
 
-Linux with systemd + cgroup v2, Python 3.12+. Run as a user with sudo. Install the coordinator
-first, then the workers. HTCondor is installed automatically if missing, and you're prompted once
-for the pool password (or set `GET_HTCONDOR_PASSWORD`).
+Linux with systemd + cgroup v2, Python 3.12+, sudo. Install the coordinator first, then the workers.
+HTCondor is installed automatically if missing, and you're prompted once for the pool password (or
+pass it with `sudo GET_HTCONDOR_PASSWORD=… bash -s -- …`).
 
 **Worker** (replace `<coord-ip>` with the coordinator's address):
 
 ```sh
-git clone https://github.com/VocanicZ/swarm.git ~/swarm && sudo bash ~/swarm/install.sh worker <coord-ip>
+curl -fsSL https://raw.githubusercontent.com/VocanicZ/swarm/main/install.sh | sudo bash -s -- worker <coord-ip>
 ```
 
-**Coordinator** (always-on machine; `--cpu-limit` = the cores swarm may use there):
+**Coordinator** (the always-on machine; `--cpu-limit` = the cores swarm may use there):
 
 ```sh
-sudo git clone https://github.com/VocanicZ/swarm.git /root/swarm-src && sudo bash /root/swarm-src/install.sh coordinator --cpu-limit 32
+curl -fsSL https://raw.githubusercontent.com/VocanicZ/swarm/main/install.sh | sudo bash -s -- coordinator --cpu-limit 32
 ```
 
-On the coordinator, clone as root so that no agent-writable directory feeds code to the root
-services.
+Or use [vocanicz-ai-tools](https://github.com/VocanicZ/vocanicz-ai-tools): `npx github:VocanicZ/vocanicz-ai-tools --setup`
+and pick the `swarm` feature.
 
 ## Update
 
-**Worker:**
-
 ```sh
-git -C ~/swarm pull && sudo bash ~/swarm/install.sh worker <coord-ip>
+sudo swarm update
 ```
 
-**Coordinator:**
-
-```sh
-sudo git -C /root/swarm-src pull && sudo bash /root/swarm-src/install.sh coordinator --cpu-limit 32
-```
-
-`install.sh` is idempotent. It re-syncs `/opt/swarm`, rewrites the configs and restarts the
-services.
+This fetches the latest `main` and re-runs the install with the role and arguments saved at install
+time (`/etc/swarm/install.args`). The installer is idempotent.
 
 ## Use
 
@@ -58,6 +56,7 @@ swarm submit path/to/job      # directory with swarm.toml
 swarm status [name]           # shards done / running / idle, merge state
 swarm cancel <name>
 swarm workers                 # machines, state, swarm's current core cap, free GPU memory
+swarm wait <name> [--timeout S]   # block until merged: exit 0 done, 1 failed, 124 timeout
 ```
 
 Minimal `swarm.toml`:
@@ -76,6 +75,14 @@ then rename). Full contract: [`skill/SKILL.md`](skill/SKILL.md), which is also i
 
 On a worker: `sudo systemctl stop condor` stops it instantly. Nothing is uploaded, and its shards
 resume elsewhere from their last save. `swarm leave` also disables it at boot.
+
+## From Harness, rtdd and other tools
+
+A tool hands batch work to swarm through the CLI only: write a job dir with a `swarm.toml`, run
+`swarm submit <dir>`, then `swarm wait <name>`. The exit code says whether the merged output is
+ready. If `swarm` isn't on `PATH`, run the work locally as before. Native support is being added to
+[Harness](https://github.com/VocanicZ/Harness) (offloading lane verification) and
+[rtdd](https://github.com/VocanicZ/rtdd) (running selected tests as shards).
 
 ## Layout
 
