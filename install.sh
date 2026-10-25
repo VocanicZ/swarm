@@ -31,8 +31,9 @@ done
 # --- common ---
 if [[ $REPO != /opt/swarm ]]; then
   mkdir -p /opt/swarm
-  command -v rsync >/dev/null || apt-get install -y rsync  # absent on the claude LXC
-  rsync -a --delete --exclude .git "$REPO/" /opt/swarm/
+  command -v rsync >/dev/null || { apt-get update && apt-get install -y rsync; }  # absent on the claude LXC
+  # root runs this code (tick, governor, `sudo install.sh` via join): root-owned, not group/other-writable
+  rsync -a --delete --chown=root:root --chmod=go-w --exclude .git "$REPO/" /opt/swarm/
 fi
 ln -sf /opt/swarm/bin/swarm /usr/local/bin/swarm
 IP=$(ip -4 route get "${coord:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
@@ -63,10 +64,10 @@ if [[ $role == coordinator ]]; then
   if [[ -n $user ]]; then
     home=$(getent passwd "$user" | cut -d: -f6)
     [[ -n $home ]] || die "no such user: $user"
-    mkdir -p "$home/.claude/skills/swarm"
-    cp -r /opt/swarm/skill/. "$home/.claude/skills/swarm/"
-    chown "$user:" "$home/.claude" "$home/.claude/skills"  # mkdir -p may have created them as root
-    chown -R "$user:" "$home/.claude/skills/swarm"
+    # as the user: root writing into a user-owned tree would follow their symlinks
+    # shellcheck disable=SC2016  # $HOME expands in the inner shell, as the user
+    runuser -u "$user" -- env HOME="$home" sh -c \
+      'mkdir -p "$HOME/.claude/skills/swarm" && cp -r /opt/swarm/skill/. "$HOME/.claude/skills/swarm/"'
   else
     echo "install.sh: no SUDO_USER or --user; skipping Claude Code skill" >&2
   fi
@@ -75,8 +76,7 @@ else
   id swarm >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin swarm
   mkdir -p /etc/swarm
   printf 'LINK_MBPS=%s\n' "$link_mbps" > /etc/swarm/worker.conf
-  for i in $(seq "$(nproc)"); do echo "SLOT1_${i}_USER = swarm"; done |
-    sed -e "s/@IP@/$IP/" -e '/@SLOT_USERS@/{r /dev/stdin' -e 'd}' /opt/swarm/condor/worker.config > "$CFG/99-swarm.config"
+  sed "s/@IP@/$IP/" /opt/swarm/condor/worker.config > "$CFG/99-swarm.config"
   rm -f "$CFG/99-swarm-spike.config"
   mkdir -p /etc/systemd/system/condor.service.d
   cp /opt/swarm/systemd/condor-instant-stop.conf /etc/systemd/system/condor.service.d/
