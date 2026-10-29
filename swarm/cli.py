@@ -104,8 +104,12 @@ def main(argv):
             status(a.name)
         elif a.cmd == "gc":
             from swarm import gc
-            hours = None if a.all_terminal else a.older_than if a.older_than is not None else gc.retention_hours()
-            print(gc.report(gc.collect(ROOT, hours, a.dry_run), a.dry_run))
+            hours = None if a.all_terminal else gc.check_hours(a.older_than, "--older-than") \
+                if a.older_than is not None else gc.retention_hours()
+            skipped = []
+            print(gc.report(gc.collect(ROOT, hours, a.dry_run, skipped=skipped), a.dry_run, skipped))
+            if skipped:
+                return 2
         elif a.cmd in ("cancel", "wait") and not NAME_RE.fullmatch(a.name):
             raise SpecError(f"bad name: {a.name!r}")
         elif a.cmd == "wait":

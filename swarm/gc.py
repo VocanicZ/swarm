@@ -1,3 +1,4 @@
+import math
 import os
 import shutil
 import stat
@@ -12,13 +13,20 @@ DEFAULT_RETENTION_HOURS = 24.0
 REASONS = {"done": "done", "failed": "failed", "pending": "abandoned"}
 
 
+def check_hours(h: float, what: str) -> float:
+    if math.isnan(h) or h < 0:  # nan/negative would make every terminal dir look old enough
+        raise SpecError(f"bad {what}: {h!r} hours (want a number >= 0)")
+    return h
+
+
 def retention_hours() -> float:
     """SWARM_JOB_RETENTION_HOURS, else 24; 0 = collect as soon as terminal."""
     v = os.environ.get("SWARM_JOB_RETENTION_HOURS")
     try:
-        return float(v) if v not in (None, "") else DEFAULT_RETENTION_HOURS
+        h = float(v) if v not in (None, "") else DEFAULT_RETENTION_HOURS
     except ValueError:
-        raise SpecError(f"bad SWARM_JOB_RETENTION_HOURS: {v!r}") from None
+        raise SpecError(f"bad SWARM_JOB_RETENTION_HOURS: {v!r} hours (want a number >= 0)") from None
+    return check_hours(h, "SWARM_JOB_RETENTION_HOURS")
 
 
 def queued_names() -> set[str]:
@@ -54,11 +62,13 @@ def _is_job_dir(d: Path) -> bool:
 
 
 def collect(state_root: Path, older_than_hours: float | None, dry_run: bool = False,
-            queued: set[str] | None = None, now: float | None = None) -> list[tuple[str, str, int]]:
+            queued: set[str] | None = None, now: float | None = None,
+            skipped: list[tuple[str, str]] | None = None) -> list[tuple[str, str, int]]:
     """Remove terminal job state dirs idle for older_than_hours (None = any age).
 
     Returns (name, reason, bytes) per dir removed, or that would be removed with dry_run.
-    Raises SpecError, collecting nothing, when condor_q cannot say what is queued."""
+    A dir that cannot be read or removed is left, appended to skipped as (name, error), and the
+    pass goes on. Raises SpecError, collecting nothing, when condor_q cannot say what is queued."""
     if queued is None:
         queued = queued_names()
     now = time.time() if now is None else now
@@ -70,12 +80,17 @@ def collect(state_root: Path, older_than_hours: float | None, dry_run: bool = Fa
         # <name>.prev is a superseded run, never itself queued: its own age decides, not its base's state
         if (not d.name.endswith(".prev") and d.name in queued) or not _is_job_dir(d):
             continue
-        newest, size = _scan(d)
-        if older_than_hours is not None and now - newest < older_than_hours * 3600:
+        try:
+            newest, size = _scan(d)
+            if older_than_hours is not None and now - newest < older_than_hours * 3600:
+                continue
+            reason = REASONS[merge_state(d)]
+            if not dry_run:
+                shutil.rmtree(d)
+        except (OSError, ValueError) as e:  # one bad dir (binary merge.log, read-only subdir, race) must not stop the pass
+            if skipped is not None:
+                skipped.append((d.name, str(e)))
             continue
-        reason = REASONS[merge_state(d)]
-        if not dry_run:
-            shutil.rmtree(d)
         out.append((d.name, reason, size))
     return out
 
@@ -87,8 +102,9 @@ def human(n: float) -> str:
         n /= 1024
 
 
-def report(entries, dry_run: bool) -> str:
+def report(entries, dry_run: bool, skipped=()) -> str:
     verb = "would remove" if dry_run else "removed"
     lines = [f"{verb} {name}: {reason}, {human(size)}" for name, reason, size in entries]
+    lines += [f"skipped {name}: {err}" for name, err in skipped]
     lines.append(f"total: {verb} {len(entries)} job(s), {human(sum(e[2] for e in entries))}")
     return "\n".join(lines)

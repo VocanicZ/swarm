@@ -233,6 +233,17 @@ class SubmitGc(unittest.TestCase):
         self.assertTrue((self.root / "toy/job.dag").exists())
         self.assertIn("condor_submit_dag", self.calls)
 
+    def test_bad_state_dir_skipped_rest_collected_at_submit(self):
+        a, bad, c = old_job(self.root, "a"), old_job(self.root, "bad"), old_job(self.root, "c")
+        (bad / "merge.log").write_bytes(b"\xff\xfe\x00garbage")
+        os.utime(bad / "merge.log", (time.time() - 48 * 3600,) * 2)
+        with redirect_stderr(io.StringIO()) as err:
+            self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+        self.assertFalse(a.exists() or c.exists())
+        self.assertTrue(bad.exists())
+        self.assertIn("gc skipped bad:", err.getvalue())
+        self.assertIn("condor_submit_dag", self.calls)
+
     def test_resubmit_keeps_own_old_run_as_prev(self):
         own = old_job(self.root, "toy")
         (own / "shards/a/out/x").write_text("1")
