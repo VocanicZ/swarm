@@ -5,8 +5,10 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 from pathlib import Path
 
+from swarm import gc
 from swarm.jobspec import SHARD_RE, JobSpec, SpecError, load
 
 SHARD_PY = "/opt/swarm/swarm/shard.py"
@@ -99,8 +101,18 @@ queue shard from shards.txt
     return statedir / "job.dag"
 
 
+def collect_garbage(state_root: Path, keep: str) -> None:
+    """Best-effort `swarm gc` before a submit; never fails it. keep (the job being submitted) is left
+    for build() to rotate to .prev rather than collected."""
+    try:
+        gc.collect(state_root, gc.retention_hours(), queued=gc.queued_names() | {keep})
+    except Exception as e:
+        print(f"swarm: gc skipped: {e}", file=sys.stderr)
+
+
 def submit(jobdir: Path, state_root: Path = Path.home() / ".swarm/jobs") -> str:
     spec = load(jobdir)
+    collect_garbage(state_root, spec.name)
     shards = split(spec)
     try:
         q = subprocess.run(["condor_q", "-af", "JobBatchName"], capture_output=True, text=True, timeout=60)

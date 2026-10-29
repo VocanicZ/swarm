@@ -1,13 +1,17 @@
+import io
 import os
 import subprocess
 import tarfile
 import tempfile
+import time
 import unittest
+from contextlib import redirect_stderr
 from pathlib import Path
 from unittest import mock
 
-from swarm import jobspec, submit
+from swarm import gc, jobspec, submit
 
+REAL_RUN = subprocess.run
 TOML = '''name = "toy"
 split = "printf 'a\\nb\\nc\\n'"
 run = "echo hi > {out}/x"
@@ -148,6 +152,95 @@ class T(unittest.TestCase):
         submit.build(spec, ["a"], self.state)  # an older .prev is replaced
         self.assertTrue((prev / "marker").exists())
         self.assertFalse((prev / "shards/a/out").exists())
+
+
+OK_LOG = "005 (12.000.000) 2026-10-25 10:00:00 Job terminated.\n\t(1) Normal termination (return value 0)\n"
+
+
+def old_job(root, name, hours=48):
+    d = Path(root) / name
+    (d / "shards/a/out").mkdir(parents=True)
+    (d / "job.json").write_text("{}")
+    (d / "merge.log").write_text(OK_LOG)
+    t = time.time() - hours * 3600
+    for top, dirs, files in os.walk(d):
+        for n in dirs + files:
+            os.utime(os.path.join(top, n), (t, t))
+    os.utime(d, (t, t))
+    return d
+
+
+class SubmitGc(unittest.TestCase):
+    def setUp(self):
+        self.enterContext(mock.patch.dict(os.environ, {"SWARM_SHARD_PY": "/x/shard.py"}))
+        os.environ.pop("SWARM_JOB_RETENTION_HOURS", None)
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory())) / "jobs"
+        self.root.mkdir()
+        self.run = self.enterContext(mock.patch(
+            "swarm.submit.subprocess.run", side_effect=self.fake_run))
+        self.calls = []
+
+    def fake_run(self, cmd, *a, **kw):
+        self.calls.append(cmd[0])
+        if cmd[0] == "condor_q":
+            return subprocess.CompletedProcess(cmd, 0, stdout="", stderr="")
+        if cmd[0] == "condor_submit_dag":
+            return subprocess.CompletedProcess(cmd, 0)
+        return REAL_RUN(cmd, *a, **kw)  # split's sh, build's tar
+
+    def test_submit_gcs_its_state_root_before_build(self):
+        order = []
+        with mock.patch("swarm.submit.gc.collect", side_effect=lambda *a, **k: order.append("gc") or []) as c, \
+                mock.patch("swarm.submit.build", side_effect=lambda *a: order.append("build")):
+            self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+        c.assert_called_once()
+        self.assertEqual(Path(c.call_args.args[0]), self.root)
+        self.assertEqual(c.call_args.args[1], gc.DEFAULT_RETENTION_HOURS)
+        self.assertFalse(c.call_args.kwargs.get("dry_run", False))
+        self.assertIn("toy", c.call_args.kwargs["queued"])
+        self.assertEqual(order, ["gc", "build"])
+
+    def test_gc_failure_does_not_fail_submit(self):
+        for exc in (jobspec.SpecError("condor_q failed"), PermissionError("denied"),
+                    OSError("rmtree"), RuntimeError("boom")):
+            with self.subTest(exc=exc), mock.patch("swarm.submit.gc.collect", side_effect=exc), \
+                    redirect_stderr(io.StringIO()) as err:
+                self.calls.clear()
+                self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+                self.assertIn("condor_submit_dag", self.calls)
+                self.assertIn(str(exc), err.getvalue())
+                self.assertTrue((self.root / "toy/job.dag").exists())
+
+    def test_gc_condor_q_failure_does_not_fail_submit(self):
+        old = old_job(self.root, "old")
+        down = [subprocess.CompletedProcess([], 1, stdout="", stderr="schedd down")]
+
+        def run(cmd, *a, **kw):  # gc's condor_q (first) fails, submit's own queued check succeeds
+            if cmd[0] == "condor_q" and down:
+                return down.pop()
+            return self.fake_run(cmd, *a, **kw)
+        self.run.side_effect = run
+        with redirect_stderr(io.StringIO()):
+            self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+        self.assertTrue(old.exists())
+
+    def test_submit_collects_old_terminal_job(self):
+        old = old_job(self.root, "old")
+        fresh = old_job(self.root, "fresh", hours=1)
+        self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+        self.assertFalse(old.exists())
+        self.assertTrue(fresh.exists())
+        self.assertTrue((self.root / "toy/job.dag").exists())
+        self.assertIn("condor_submit_dag", self.calls)
+
+    def test_resubmit_keeps_own_old_run_as_prev(self):
+        own = old_job(self.root, "toy")
+        (own / "shards/a/out/x").write_text("1")
+        os.utime(own / "shards/a/out/x", (time.time() - 48 * 3600,) * 2)
+        self.assertEqual(submit.submit(mkjob(), self.root), "toy")
+        self.assertEqual((self.root / "toy.prev/shards/a/out/x").read_text(), "1")
+        self.assertTrue((self.root / "toy/job.dag").exists())
+
 
 
 if __name__ == "__main__":
