@@ -91,6 +91,10 @@ def main(argv):
     w = sub.add_parser("wait")
     w.add_argument("name")
     w.add_argument("--timeout", type=float)
+    g = sub.add_parser("gc")
+    g.add_argument("--dry-run", action="store_true")
+    g.add_argument("--older-than", type=float, metavar="HOURS")
+    g.add_argument("--all-terminal", action="store_true")
     a = ap.parse_args(argv)
     try:
         if a.cmd == "submit":
@@ -98,6 +102,10 @@ def main(argv):
             print(submit.submit(Path(a.jobdir)))
         elif a.cmd == "status":
             status(a.name)
+        elif a.cmd == "gc":
+            from swarm import gc
+            hours = None if a.all_terminal else a.older_than if a.older_than is not None else gc.retention_hours()
+            print(gc.report(gc.collect(ROOT, hours, a.dry_run), a.dry_run))
         elif a.cmd in ("cancel", "wait") and not NAME_RE.fullmatch(a.name):
             raise SpecError(f"bad name: {a.name!r}")
         elif a.cmd == "wait":

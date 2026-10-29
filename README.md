@@ -57,6 +57,7 @@ swarm status [name]           # shards done / running / idle, merge state
 swarm cancel <name>
 swarm workers                 # machines, state, swarm's current core cap, free GPU memory
 swarm wait <name> [--timeout S]   # block until merged: exit 0 done, 1 failed, 124 timeout
+swarm gc [--dry-run] [--older-than H] [--all-terminal]   # remove finished job state dirs idle > 24 h
 ```
 
 Minimal `swarm.toml`:
