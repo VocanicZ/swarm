@@ -67,7 +67,8 @@ def collect(state_root: Path, older_than_hours: float | None, dry_run: bool = Fa
         return []
     out = []
     for d in sorted(root.iterdir()):
-        if d.name.endswith(".prev") or d.name in queued or not _is_job_dir(d):
+        # <name>.prev is a superseded run, never itself queued: its own age decides, not its base's state
+        if (not d.name.endswith(".prev") and d.name in queued) or not _is_job_dir(d):
             continue
         newest, size = _scan(d)
         if older_than_hours is not None and now - newest < older_than_hours * 3600:

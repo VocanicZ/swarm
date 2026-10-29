@@ -80,7 +80,7 @@ save_seconds = 3600                # optional: checkpoint interval (default 3600
 | `swarm status [name]` | Show progress for all jobs, or for one. |
 | `swarm cancel <name>` | Remove all of the job's queued and running shards and the merge. |
 | `swarm wait <name> [--timeout S]` | Block until the merge finishes. Exit 0 = merged output ready, 1 = failed, 124 = timed out. Use this from scripts and other tools. |
-| `swarm gc [--dry-run] [--older-than H] [--all-terminal]` | Remove state dirs of finished jobs (done, failed, or abandoned: out of the queue with no merge) whose newest file is older than 24 h (`SWARM_JOB_RETENTION_HOURS` overrides, `0` = at once; `--older-than` overrides both; `--all-terminal` ignores the window). Never touches queued jobs, non-swarm dirs, symlinks or `.prev`; collects nothing if `condor_q` fails. Prints name, reason and size per dir, then a total. |
+| `swarm gc [--dry-run] [--older-than H] [--all-terminal]` | Remove state dirs of finished jobs (done, failed, or abandoned: out of the queue with no merge) whose newest file is older than 24 h (`SWARM_JOB_RETENTION_HOURS` overrides, `0` = at once; `--older-than` overrides both; `--all-terminal` ignores the window). `<name>.prev` dirs follow the same window on their own age, even while `<name>` is queued. Never touches queued jobs, non-swarm dirs or symlinks; collects nothing if `condor_q` fails. Prints name, reason and size per dir, then a total. |
 | `swarm workers` | Print one row per slot: `Machine State Cpus SwarmCapCores SwarmGpuFreeMB`. |
 | `swarm join <coord-ip> [--link-mbps N]` / `swarm leave` / `swarm update` | Add this machine as a worker, remove it, or update it to the latest main (needs sudo; owner only). |
 
