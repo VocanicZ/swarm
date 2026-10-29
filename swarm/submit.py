@@ -104,10 +104,13 @@ queue shard from shards.txt
 def collect_garbage(state_root: Path, keep: str) -> None:
     """Best-effort `swarm gc` before a submit; never fails it. keep (the job being submitted) is left
     for build() to rotate to .prev rather than collected."""
+    skipped = []
     try:
-        gc.collect(state_root, gc.retention_hours(), queued=gc.queued_names() | {keep})
+        gc.collect(state_root, gc.retention_hours(), queued=gc.queued_names() | {keep}, skipped=skipped)
     except Exception as e:
         print(f"swarm: gc skipped: {e}", file=sys.stderr)
+    for name, err in skipped:
+        print(f"swarm: gc skipped {name}: {err}", file=sys.stderr)
 
 
 def submit(jobdir: Path, state_root: Path = Path.home() / ".swarm/jobs") -> str:

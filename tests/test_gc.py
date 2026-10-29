@@ -188,6 +188,67 @@ class Collect(Base):
         with mock.patch("swarm.gc.subprocess.run", return_value=q()):
             self.assertEqual(gc.collect(self.root / "nope", 24), [])
 
+    def test_bad_merge_log_skips_that_dir_only(self):
+        a, b, c = self.job("a", OK), self.job("b", BAD), self.job("c", OK)
+        (b / "merge.log").write_bytes(b"\xff\xfe\x00garbage")
+        self.age(b, 48)
+        skipped = []
+        with mock.patch("swarm.gc.subprocess.run", return_value=q()):
+            out = gc.collect(self.root, 24, skipped=skipped)
+        self.assertEqual([n for n, _, _ in out], ["a", "c"])
+        self.assertEqual([n for n, _ in skipped], ["b"])
+        self.assertIn("decode", skipped[0][1])
+        self.assertFalse(a.exists() or c.exists())
+        self.assertTrue(b.exists())
+
+    def test_rmtree_failure_skips_that_dir_only(self):
+        a, b, c = self.job("a", OK), self.job("b", OK), self.job("c", OK)
+        real = gc.shutil.rmtree
+
+        def rmtree(d, *args, **kw):
+            if Path(d).name == "b":
+                raise PermissionError(13, "Permission denied", str(d))
+            real(d, *args, **kw)
+
+        skipped = []
+        with mock.patch("swarm.gc.subprocess.run", return_value=q()), \
+                mock.patch("swarm.gc.shutil.rmtree", side_effect=rmtree):
+            out = gc.collect(self.root, 24, skipped=skipped)
+        self.assertEqual([n for n, _, _ in out], ["a", "c"])
+        self.assertEqual([n for n, _ in skipped], ["b"])
+        self.assertIn("Permission denied", skipped[0][1])
+        self.assertFalse(a.exists() or c.exists())
+
+    def test_scan_vanished_file_skips_that_dir_only(self):
+        self.job("a", OK), self.job("b", OK), self.job("c", OK)
+        real = gc._scan
+
+        def scan(d):
+            if d.name == "b":
+                raise FileNotFoundError(2, "No such file or directory", str(d / "gone"))
+            return real(d)
+
+        skipped = []
+        with mock.patch("swarm.gc.subprocess.run", return_value=q()), mock.patch("swarm.gc._scan", side_effect=scan):
+            out = gc.collect(self.root, 24, skipped=skipped)
+        self.assertEqual([n for n, _, _ in out], ["a", "c"])
+        self.assertEqual([n for n, _ in skipped], ["b"])
+        self.assertTrue((self.root / "b").exists())
+
+    def test_skipped_without_list_still_collects_rest(self):
+        self.job("a", OK), self.job("b", OK)
+        (self.root / "a/merge.log").write_bytes(b"\xff\xfe")
+        self.age(self.root / "a", 48)
+        with mock.patch("swarm.gc.subprocess.run", return_value=q()):
+            self.assertEqual([n for n, _, _ in gc.collect(self.root, None)], ["b"])
+
+    def test_retention_env_rejects_nan_and_negative(self):
+        for v in ("nan", "-1", "-0.5", "abc"):
+            with self.subTest(v=v):
+                os.environ["SWARM_JOB_RETENTION_HOURS"] = v
+                with self.assertRaises(SpecError):
+                    gc.retention_hours()
+
 
 class Human(unittest.TestCase):
     def test_human(self):
@@ -260,6 +321,31 @@ class Cli(Base):
         self.assertEqual((rc, out), (2, ""))
         self.assertIn("condor_q failed", err)
         self.assertTrue((self.root / "a").exists())
+
+    def test_bad_dir_reported_skipped_exit_2(self):
+        self.job("a", OK), self.job("b", BAD), self.job("c", OK)
+        (self.root / "b/merge.log").write_bytes(b"\xff\xfe\x00garbage")
+        self.age(self.root / "b", 48)
+        rc, out, err = self.main()
+        self.assertEqual(rc, 2)
+        self.assertNotIn("Traceback", err)
+        lines = out.splitlines()
+        self.assertRegex(lines[0], r"^removed a: done, ")
+        self.assertRegex(lines[1], r"^removed c: done, ")
+        self.assertRegex(lines[2], r"^skipped b: .*decode")
+        self.assertRegex(lines[3], r"^total: removed 2 job\(s\), ")
+        self.assertFalse((self.root / "a").exists() or (self.root / "c").exists())
+        self.assertTrue((self.root / "b").exists())
+
+    def test_rejects_nan_and_negative_hours(self):
+        self.job("a", OK)
+        for env, argv in (("nan", ()), ("-1", ()), ("", ("--older-than", "-1")), ("", ("--older-than", "nan"))):
+            with self.subTest(env=env, argv=argv):
+                os.environ["SWARM_JOB_RETENTION_HOURS"] = env
+                rc, out, err = self.main(*argv)
+                self.assertEqual((rc, out), (2, ""))
+                self.assertIn("hours", err.lower())
+                self.assertTrue((self.root / "a").exists())
 
     def test_listed_in_help(self):
         out = io.StringIO()

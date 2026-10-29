@@ -91,6 +91,10 @@ job's `merge` must copy the results it needs out of it, into the job dir or else
   age, even while `<name>` is queued.
 - **Automatic.** `swarm submit` runs a GC pass first. It is best effort: if it fails (for example
   `condor_q` is down), the submit goes ahead and prints `swarm: gc skipped: …` to stderr.
+- **Bad dirs.** A state dir GC cannot read or remove (an undecodable `merge.log`, a read-only
+  subdir, a file that vanished mid-scan) is left in place and skipped; the rest of the pass carries
+  on. `swarm gc` prints `skipped <name>: <error>` for it and exits 2; `swarm submit` warns
+  `swarm: gc skipped <name>: …` and goes ahead. A NaN or negative window is rejected.
 - **Never touched:** queued or running jobs, dirs without a `job.json` or `job.dag`, symlinks, and
   plain files. If `condor_q` fails, GC collects nothing. The coordinator tick (`swarm-tick`) never
   deletes state.
