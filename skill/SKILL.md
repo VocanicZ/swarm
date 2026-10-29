@@ -45,6 +45,10 @@ save_seconds = 3600                # optional: checkpoint interval (default 3600
   input makes slow-link workers lose the placement formula.
 - `split` and `merge` run in the job dir on the coordinator. `{outs}` is the space-separated list
   of every shard's `out` dir, in `split` order.
+- `merge` must copy every result it needs out of the state dir, into the job dir or elsewhere.
+  The `{outs}` dirs live in `~/.swarm/jobs/<name>/`, which is temporary: once the job is finished
+  and idle past the retention window (24 h by default), it is garbage-collected by `swarm gc` or
+  the next `swarm submit`. A resubmit also moves it to `<name>.prev/`.
 - `run`, `check`, and `setup` run with the cwd at the unpacked copy of `workdir` on the machine
   running the shard.
   - On a worker that is the `swarm` user, which cannot read the owner's home. Use relative paths

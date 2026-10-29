@@ -77,6 +77,41 @@ then rename). Full contract: [`skill/SKILL.md`](skill/SKILL.md), which is also i
 On a worker: `sudo systemctl stop condor` stops it instantly. Nothing is uploaded, and its shards
 resume elsewhere from their last save. `swarm leave` also disables it at boot.
 
+## Job state and `swarm gc`
+
+Each job's state dir, `~/.swarm/jobs/<name>/` (DAG, logs, shard `out` dirs), is **temporary**. The
+job's `merge` must copy the results it needs out of it, into the job dir or elsewhere.
+
+- **Retention.** A terminal job's state dir is removed once it has been idle for the retention
+  window: 24 h by default, measured from the newest mtime of anything inside it. Terminal means
+  `done` (merge exited 0), `failed` (merge or DAG failed), or `abandoned` (out of the queue with no
+  merge). Set `SWARM_JOB_RETENTION_HOURS` to change the window; `0` means remove as soon as the job
+  is terminal.
+- **`.prev` dirs.** `<name>.prev/`, the run a resubmit replaced, follows the same rule on its own
+  age, even while `<name>` is queued.
+- **Automatic.** `swarm submit` runs a GC pass first. It is best effort: if it fails (for example
+  `condor_q` is down), the submit goes ahead and prints `swarm: gc skipped: …` to stderr.
+- **Never touched:** queued or running jobs, dirs without a `job.json` or `job.dag`, symlinks, and
+  plain files. If `condor_q` fails, GC collects nothing. The coordinator tick (`swarm-tick`) never
+  deletes state.
+
+Run it by hand:
+
+```sh
+swarm gc                      # remove terminal state dirs idle longer than the window
+swarm gc --dry-run            # list what would be removed, remove nothing
+swarm gc --older-than 2       # use a 2 h window instead of SWARM_JOB_RETENTION_HOURS
+swarm gc --all-terminal       # remove every terminal state dir, whatever its age
+```
+
+```
+$ swarm gc --dry-run
+would remove sweep-v3: done, 1.2M
+would remove render-old: failed, 51.0M
+would remove fit-v2.prev: abandoned, 4.0K
+total: would remove 3 job(s), 52.2M
+```
+
 ## From Harness, rtdd and other tools
 
 A tool hands batch work to swarm through the CLI only: write a job dir with a `swarm.toml`, run
