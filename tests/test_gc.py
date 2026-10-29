@@ -101,9 +101,55 @@ class Collect(Base):
         self.assertEqual(self.collect(), [])
         self.assertTrue(d.exists())
 
-    def test_prev_skipped(self):
-        d = self.job("a.prev", OK)
+    def test_prev_kept_inside_window(self):
+        d = self.job("a.prev", OK, age_h=1)
         self.assertEqual(self.collect(), [])
+        self.assertTrue(d.exists())
+
+    def test_prev_collected_after_window(self):
+        a, b, p = self.job("a.prev", OK), self.job("b.prev", BAD), self.job("p.prev", marker="job.dag")
+        out = self.collect()
+        self.assertEqual([(n, r) for n, r, _ in out], [("a.prev", "done"), ("b.prev", "failed"), ("p.prev", "abandoned")])
+        self.assertFalse(a.exists() or b.exists() or p.exists())
+        self.assertTrue(all(s >= 100 for _, _, s in out))
+
+    def test_prev_collected_while_base_queued(self):
+        base, prev = self.job("a"), self.job("a.prev", OK)
+        self.assertEqual([n for n, _, _ in self.collect(queued="a\n")], ["a.prev"])
+        self.assertTrue(base.exists())
+        self.assertFalse(prev.exists())
+
+    def test_prev_collected_with_base(self):
+        base, prev = self.job("a", OK), self.job("a.prev", BAD)
+        self.assertEqual([(n, r) for n, r, _ in self.collect()], [("a", "done"), ("a.prev", "failed")])
+        self.assertFalse(base.exists() or prev.exists())
+
+    def test_prev_without_job_files_skipped(self):
+        d = self.root / "a.prev"
+        d.mkdir()
+        (d / "notes").write_text("keep")
+        self.age(d, 48)
+        self.assertEqual(self.collect(), [])
+        self.assertTrue(d.exists())
+
+    def test_prev_symlink_not_followed(self):
+        outside = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        (outside / "job.json").write_text("{}")
+        (outside / "merge.log").write_text(OK)
+        (self.root / "a.prev").symlink_to(outside)
+        self.age(outside, 48)
+        self.assertEqual(self.collect(hours=None), [])
+        self.assertTrue((outside / "job.json").exists())
+
+    def test_condor_q_failure_collects_no_prev(self):
+        d = self.job("a.prev", OK)
+        with self.assertRaises(SpecError):
+            self.collect(returncode=1)
+        self.assertTrue(d.exists())
+
+    def test_dry_run_deletes_no_prev(self):
+        d = self.job("a.prev", OK)
+        self.assertEqual([(n, r) for n, r, _ in self.collect(dry_run=True)], [("a.prev", "done")])
         self.assertTrue(d.exists())
 
     def test_symlink_in_root_not_followed(self):
@@ -167,6 +213,22 @@ class Cli(Base):
         self.assertRegex(lines[0], r"^removed a: done, \d+(\.\d)?[BKMG]$")
         self.assertRegex(lines[1], r"^removed p: abandoned, ")
         self.assertRegex(lines[2], r"^total: removed 2 job\(s\), ")
+
+    def test_prev_listed_with_suffix(self):
+        self.job("a.prev", BAD)
+        rc, out, _ = self.main()
+        self.assertEqual(rc, 0)
+        self.assertRegex(out.splitlines()[0], r"^removed a\.prev: failed, ")
+        self.assertFalse((self.root / "a.prev").exists())
+
+    def test_status_ignores_prev(self):
+        self.job("a", OK)
+        self.job("a.prev", BAD)
+        out = io.StringIO()
+        with mock.patch.object(cli, "ROOT", self.root), \
+                mock.patch("swarm.cli.subprocess.run", return_value=q()), redirect_stdout(out):
+            cli.status()
+        self.assertEqual(out.getvalue(), "a: 1/0 done, 0 running, 0 idle\n  merge: done\n")
 
     def test_dry_run_prints_same_lines(self):
         self.job("a", OK)
