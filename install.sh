@@ -5,6 +5,8 @@
 #   install.sh update            (re-run with the saved role/args on the latest main)
 # Piped (curl ... | sudo bash -s -- <role> ...) it fetches main itself.
 set -euo pipefail
+# root's tools (runuser, useradd) live in sbin; `su` without `-` keeps a user PATH that lacks it
+export PATH="/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:$PATH"
 
 usage() { echo "usage: $0 coordinator [--cpu-limit N] [--user NAME] | worker <coord-ip> [--link-mbps N] | update" >&2; exit 2; }
 die() { echo "install.sh: $*" >&2; exit 1; }
@@ -54,6 +56,9 @@ fi
 ln -sf /opt/swarm/bin/swarm /usr/local/bin/swarm
 IP=$(ip -4 route get "${coord:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "src") { print $(i + 1); exit }}')
 [[ -n $IP ]] || die "cannot find local IP toward ${coord:-1.1.1.1}"
+# a worker pins its device, not its address: a new DHCP lease must not strand the startd
+DEV=$(ip -4 route get "${coord:-1.1.1.1}" | awk '{for (i = 1; i < NF; i++) if ($i == "dev") { print $(i + 1); exit }}')
+[[ -n $DEV ]] || die "cannot find local device toward ${coord:-1.1.1.1}"
 
 install_condor() {  # $@ = installer role flags
   command -v condor_version >/dev/null && return
@@ -92,7 +97,7 @@ else
   id swarm >/dev/null 2>&1 || useradd --system --create-home --shell /usr/sbin/nologin swarm
   mkdir -p /etc/swarm
   printf 'LINK_MBPS=%s\n' "$link_mbps" > /etc/swarm/worker.conf
-  sed "s/@IP@/$IP/" /opt/swarm/condor/worker.config > "$CFG/99-swarm.config"
+  sed "s/@DEV@/$DEV/" /opt/swarm/condor/worker.config > "$CFG/99-swarm.config"
   rm -f "$CFG/99-swarm-spike.config"
   mkdir -p /etc/systemd/system/condor.service.d
   cp /opt/swarm/systemd/condor-instant-stop.conf /etc/systemd/system/condor.service.d/
