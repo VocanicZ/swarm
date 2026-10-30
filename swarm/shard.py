@@ -21,6 +21,9 @@ KILL_GRACE = 10
 GPU_STALE_S = 10  # governor rewrites gpu.json every 2 s; older = governor dead
 POLL = float(os.environ.get("SWARM_POLL_SECONDS", 5))
 MARKER_ROOT = Path("/var/tmp")
+# HTCondor gives a job no PATH; sh then searches its built-in one without exporting it, and g++
+# cannot find cc1plus. Every command run/setup/check starts gets this one exported.
+DEFAULT_PATH = "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
 
 
 def sh(cmd, cwd):
@@ -126,6 +129,7 @@ def kill(p, grace=KILL_GRACE):
 
 
 def main(argv):
+    os.environ.setdefault("PATH", DEFAULT_PATH)
     shard = argv[0]
     job = json.loads(Path("job.json").read_text())
     work, out = Path("work").resolve(), Path("out").resolve()
