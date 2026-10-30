@@ -19,7 +19,7 @@ def gate():
 def start_expr():
     # START as condor itself expands it ($(SWARM_GATE) is textual macro substitution)
     with tempfile.TemporaryDirectory() as d:
-        cfg = CONFIG.read_text().replace("@IP@", "127.0.0.1")
+        cfg = CONFIG.read_text().replace("@DEV@", "lo")
         Path(d, "worker.config").write_text(cfg)
         Path(d, "condor_config").write_text(
             f"LOCAL_DIR = {d}\nLOCAL_CONFIG_FILE =\nLOCAL_CONFIG_DIR =\ninclude : {d}/worker.config\n")
