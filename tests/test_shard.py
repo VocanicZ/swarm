@@ -56,6 +56,15 @@ class ShardTest(unittest.TestCase):
         self.assertEqual(shard.main(["s1"]), 0)
         self.assertTrue((box / "out/r").exists())
 
+    def test_path_exported_when_job_env_has_none(self):
+        # HTCondor starts jobs without PATH; sh then searches a built-in path but never exports it,
+        # so g++ cannot find its own cc1plus. The shard must hand every command an exported PATH.
+        box = self.sandbox('/usr/bin/env > "$2/env"\n')
+        env = {k: v for k, v in os.environ.items() if k != "PATH"}
+        with mock.patch.dict(os.environ, env, clear=True):
+            self.assertEqual(shard.main(["s1"]), 0)
+        self.assertIn(f"PATH={shard.DEFAULT_PATH}\n", (box / "out/env").read_text())
+
     def test_run_failure_code(self):
         self.sandbox("exit 3\n")
         self.assertEqual(shard.main(["s1"]), 3)

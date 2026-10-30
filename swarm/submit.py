@@ -57,7 +57,7 @@ def build(spec: JobSpec, shards: list[str], statedir: Path) -> Path:
     outs = " ".join(shlex.quote(str(statedir / "shards" / i / "out")) for i in shards)
     merge = spec.merge.replace("{outs}", outs)
     sh = statedir / "merge.sh"
-    sh.write_text(f"#!/bin/sh\ncd {shlex.quote(str(spec.jobdir))} && {merge}\n")
+    sh.write_text(f"#!/bin/sh\nexport PATH\ncd {shlex.quote(str(spec.jobdir))} && {merge}\n")  # job env has no PATH
     sh.chmod(0o755)
     (statedir / "job.dag").write_text(
         "JOB shards shards.sub\nJOB merge merge.sub\nPARENT shards CHILD merge\n")
